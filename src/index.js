@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { createApp } from './app.js';
 import { createMailer } from './mailer.js';
 import { naverClientFromEnv } from './naver.js';
+import { ensureDemoAccount } from './seed.js';
 import { createSmsSender } from './sms.js';
 
 const port = Number(process.env.PORT) || 3000;
@@ -27,7 +28,7 @@ const showCodes = process.env.SHOW_VERIFICATION_CODES === '1';
 if (production && showCodes) {
   console.warn('[warn] SHOW_VERIFICATION_CODES=1: 인증번호가 화면에 표시됩니다. 비공개 시범 운영에서만 사용하세요.');
 }
-const { server, startScheduler } = createApp({
+const { server, db, startScheduler } = createApp({
   dbPath: process.env.DB_PATH || 'meet.db',
   secret,
   naver,
@@ -39,6 +40,8 @@ const { server, startScheduler } = createApp({
   // Caddy 등 프록시 뒤에서 실행하면 TRUST_PROXY=1
   trustProxy: process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY : false,
 });
+// 운영자 체험 계정 (DEMO_LOGIN_EMAIL / DEMO_LOGIN_PASSWORD 가 있을 때만)
+ensureDemoAccount(db);
 startScheduler();
 server.listen(port, () => {
   console.log(`MEET 택시 합승 서버: http://localhost:${port}`);

@@ -35,6 +35,18 @@
 - 서비스 화면 위쪽의 **`https://meet-xxxx.onrender.com`** 주소로 접속
 - `https://주소/api/health` 가 `{"ok":true}` 이면 정상
 
+### 가입 없이 바로 들어가 보기: 운영자 체험 계정
+서비스 → **Environment** → **Add Environment Variable** 로 두 개 추가 → **Save** (자동 재시작)
+
+| Key | Value |
+| --- | --- |
+| `DEMO_LOGIN_EMAIL` | 로그인에 쓸 이메일 (예: `owner@meet.app` — 실제 메일 주소가 아니어도 됨) |
+| `DEMO_LOGIN_PASSWORD` | 8자 이상 비밀번호 (직접 정하세요) |
+
+재시작 후 앱의 **로그인** 탭에서 이 이메일·비밀번호로 들어가면 문자 인증·약관 동의가 끝난 상태예요. **Logs** 에 `[demo] 체험 계정 준비됨` 이 보이면 성공.
+선택: `DEMO_LOGIN_GENDER`(`male`/`female`, 기본 male), `DEMO_LOGIN_NICKNAME`(기본 "운영자").
+비밀번호를 바꾸려면 값을 바꾸고 저장하면 돼요(기존 로그인은 해제). 필요 없어지면 두 변수를 지우세요 — 계정은 남지만 더 이상 갱신되지 않아요.
+
 ### SENS 준비 전: 비공개 시범 운영
 서비스 → **Environment** → `SHOW_VERIFICATION_CODES` 를 **`1`** 로 바꾸고 저장 → 가입 화면에 인증번호가 그대로 보여서 문자 없이 가입할 수 있어요.
 ⚠️ 누구나 아무 번호로 가입할 수 있게 되므로 **지인 테스트용으로만** 쓰고, 공개 전에는 SENS 키를 넣고 **`0`** 으로 되돌리세요.

@@ -87,6 +87,7 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `JWT_SECRET` | 토큰 서명 키. 운영 환경에서는 반드시 설정 |
 | `NODE_ENV` | `production` 이면 개발용 인증번호 화면 노출이 꺼짐 (운영 필수) |
 | `NCP_ACCESS_KEY` / `NCP_SECRET_KEY` / `NCP_SENS_SERVICE_ID` / `SMS_FROM` | 휴대폰 인증문자 발송 (네이버 클라우드 SENS). **없으면 인증번호를 서버 콘솔에 출력**하고, 개발 모드에서는 화면에도 보여줌 |
+| `DEMO_LOGIN_EMAIL` / `DEMO_LOGIN_PASSWORD` | 운영자 체험 계정 — 서버 시작 때 가입·문자 인증 없이 로그인 가능한 계정을 만들거나 비밀번호 갱신 (선택: `DEMO_LOGIN_GENDER`, `DEMO_LOGIN_NICKNAME`) |
 | `SHOW_VERIFICATION_CODES` | `1` 이면 운영 모드에서도 인증번호를 화면에 표시 — SENS 준비 전 **비공개 시범 운영 전용** |
 | `SMTP_URL` / `MAIL_FROM` | 소속(학교·회사) 인증 메일 발송용 SMTP. 없으면 콘솔 출력 |
 | `TURN_URLS` + `TURN_SECRET` (또는 `TURN_USERNAME`/`TURN_CREDENTIAL`) | 음성 통화 중계(TURN) 서버. `TURN_SECRET` 이면 coturn `use-auth-secret` 방식으로 사용자별 1시간 임시 계정 발급 |
