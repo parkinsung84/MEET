@@ -26,6 +26,41 @@ function upcomingBanner() {
   return box;
 }
 
+/** 자동 매칭 상태 배너 (찾는 중 / 매칭됨) */
+function matchBanner() {
+  const box = h('div');
+  async function render() {
+    try {
+      const { request } = await api('GET', '/matching');
+      if (request?.status === 'waiting') {
+        box.replaceChildren(h('div', { class: 'card banner matching' },
+          h('strong', {}, '🤖 자동 매칭 찾는 중…'),
+          h('div', {}, `${request.origin.name} → ${request.destination.name}`),
+          h('div', { class: 'muted' }, `${formatTime(request.to)}까지 · 맞는 사람이나 방이 생기면 바로 알려드려요`),
+          h('button', {
+            class: 'secondary small',
+            onclick: async () => {
+              await api('DELETE', '/matching').catch((err) => toast(err.message));
+              render();
+            },
+          }, '매칭 취소')));
+      } else if (request?.status === 'matched' && Date.now() - Date.parse(request.to) < 0) {
+        box.replaceChildren(h('a', { class: 'card banner', href: `#/rides/${request.rideId}` },
+          h('strong', {}, '🎉 자동 매칭 완료!'),
+          h('div', {}, `${request.origin.name} → ${request.destination.name} · 눌러서 합승방으로`)));
+      } else {
+        box.replaceChildren();
+      }
+    } catch { /* 무시 */ }
+  }
+  render();
+  listen(window, 'notification', (e) => {
+    if (['matched', 'match-expired'].includes(e.detail.type)) render();
+  });
+  box.refresh = render;
+  return box;
+}
+
 export function homeScreen() {
   const prev = saved();
   let mode = prev.mode ?? 'now';
@@ -65,10 +100,37 @@ export function homeScreen() {
     h('div', { class: 'row' }, radius, h('button', {}, '🔍 합승 찾기')),
   );
 
+  /** 자동 매칭 신청: 지금 조건(경로·시간)으로 요청 → 맞는 방에 자동 참여하거나 같은 요청끼리 방을 만든다 */
+  async function requestMatch(o, d, range) {
+    try {
+      const { request } = await api('POST', '/matching', {
+        origin: o, destination: d, radiusKm: Math.min(Number(radius.value), 3),
+        from: range.from.toISOString(), to: range.to.toISOString(),
+      });
+      if (request.status === 'matched') {
+        toast('🎉 바로 매칭됐어요!');
+        location.hash = `#/rides/${request.rideId}`;
+      } else {
+        toast('🤖 매칭을 찾는 중이에요. 맞는 사람이 생기면 바로 알려드릴게요.');
+        banner.refresh();
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  const matchButton = (o, d, range, primary) => h('button', {
+    class: primary ? 'wide' : 'secondary wide',
+    onclick: () => requestMatch(o, d, range),
+  }, '🤖 자동 매칭 신청');
+
   function emptyState(o, d, range) {
     const actions = [];
+    // 가장 쉬운 길: 자동 매칭 (방을 찾거나 만들 필요 없음)
+    if (o && d) actions.push(matchButton(o, d, range, true));
     // 지금 조건 그대로 방 만들기
     actions.push(h('button', {
+      class: 'secondary',
       onclick: () => {
         sessionStorage.setItem('meet.draft', JSON.stringify({
           origin: o, destination: d,
@@ -111,11 +173,15 @@ export function homeScreen() {
       const params = new URLSearchParams({ radiusKm: radius.value, from: range.from.toISOString(), to: range.to.toISOString() });
       if (o) params.set('originLat', o.lat), params.set('originLng', o.lng);
       if (d) params.set('destLat', d.lat), params.set('destLng', d.lng);
-      const { rides } = await api('GET', `/rides?${params}`);
-      list.replaceChildren(
+      const { rides, demand } = await api('GET', `/rides?${params}`);
+      list.replaceChildren(h('div', {},
         h('h2', {}, `${mode === 'now' ? `${NOW_WINDOW_MIN}분 안에 출발하는` : '그 시간대'} 합승 ${rides.length}건`),
+        demand > 0 && h('div', { class: 'demand' }, `👀 지금 이 경로를 ${demand}명이 찾고 있어요 — 자동 매칭을 신청하면 바로 연결돼요`),
         ...(rides.length ? rides.map(rideCard) : [emptyState(o, d, range)]),
-      );
+        rides.length > 0 && o && d && h('div', { class: 'stack match-more' },
+          h('p', { class: 'muted' }, '맞는 방이 없나요? 자동 매칭을 신청하면 조건이 맞는 방이나 사람을 찾아 바로 연결해 드려요.'),
+          matchButton(o, d, range, false)),
+      ));
     } catch (err) {
       if (!silent) toast(err.message);
     }
@@ -126,10 +192,13 @@ export function homeScreen() {
   listen(window, 'rides:changed', () => load({ silent: true }));
   renderTabs();
   load({ silent: true });
+  const banner = matchBanner();
+  listen(window, 'rides:changed', () => banner.refresh());
 
   return h('div', {},
     !state.user.verified && h('a', { class: 'card banner warn', href: '#/verify' },
       h('strong', {}, '📱 휴대폰 본인 확인이 필요해요'), h('div', {}, '확인을 마치면 합승을 만들고 참여할 수 있어요.')),
+    banner,
     upcomingBanner(),
     form,
     list,

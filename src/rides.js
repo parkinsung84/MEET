@@ -21,6 +21,8 @@ const EXPIRE_AFTER_MS = 30 * MIN;     // 출발 30분이 지나도 '출발' 처�
 const AUTO_COMPLETE_MS = 3 * 60 * MIN; // 출발 3시간 후 자동 '도착 완료'
 const MAX_DROPOFF_DETOUR_KM = 3;      // 경로에서 이보다 먼 하차 지점은 불가
 const SAME_DEST_KM = 0.5;             // 도착지와 이만큼 가까우면 같은 도착지로 본다
+const SIMILAR_KM = 1;                 // 비슷한 방: 출발지·도착지가 각각 1km 이내
+const SIMILAR_WINDOW_MS = 20 * MIN;   //            출발 시간 ±20분
 const ON_THE_WAY_MIN_T = 0.2;         // 경로의 20% 이상은 같이 가야 '가는 길 하차'로 매칭
 
 // 허용되는 상태 전이 (방장만 변경 가능)
@@ -364,7 +366,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
      *  - from/to: 출발 시간 범위 (기본: 지금부터 7일)
      * 참여할 수 없는 방(성별·소속·차단·만석)은 제외하고, 경로 차이 + 시간 차이가 작은 순으로 정렬한다.
      */
-    search(query = {}, viewerId) {
+    search(query = {}, viewerId, { log = true } = {}) {
       const radiusKm = Math.min(Number(query.radiusKm) || DEFAULT_RADIUS_KM, 10);
       const viewer = stmt.userById.get(viewerId);
       const blocked = users.blockedSet(viewerId);
@@ -381,7 +383,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
       // 시간 차이 기준점: 범위를 주면 그 가운데, 아니면 지금
       const center = qFrom !== null && qTo !== null ? (qFrom + qTo) / 2 : (qFrom ?? now);
 
-      if (origin || destination) {
+      if (log && (origin || destination)) {
         recordLocation(viewerId, { action: 'search', purpose: '출발지·도착지 주변 합승 검색' }, { throttleMs: 60 * 1000 });
       }
       const results = [];
@@ -629,6 +631,74 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
         body: `${normalized}${memo ? ` (${memo})` : ''} · ${nicknameOf(userId)}님이 기록했어요.`,
       });
       return service.get(ride.id, userId);
+    },
+
+    /**
+     * 이 방과 합칠 수 있는 비슷한 방 (출발·도착 1km, 출발 시간 ±20분).
+     * 이 방의 멤버 전원이 들어갈 자리가 있고, 모두 참여 조건을 만족하는 방만.
+     */
+    similarRides(rideId, userId) {
+      const ride = loadRide(rideId);
+      assertMember(ride.id, userId);
+      if (ride.status !== 'open') return [];
+      const members = stmt.members.all(ride.id);
+      const at = new Date(ride.depart_at).getTime();
+      return service.search({
+        originLat: ride.origin_lat, originLng: ride.origin_lng, destLat: ride.dest_lat, destLng: ride.dest_lng,
+        radiusKm: SIMILAR_KM, from: new Date(at - SIMILAR_WINDOW_MS).toISOString(), to: new Date(at + SIMILAR_WINDOW_MS).toISOString(),
+      }, userId, { log: false }).filter((r) => {
+        if (r.id === ride.id || r.joined || r.memberCount + members.length > r.maxSeats) return false;
+        const target = loadRide(r.id);
+        return members.every((m) => !eligibility(target, stmt.userById.get(m.id)));
+      });
+    },
+
+    /**
+     * 방 합치기 (방장): 이 방의 멤버 전원을 비슷한 다른 방으로 옮기고 이 방은 닫는다.
+     * 하차 지점은 옮겨 갈 방의 경로 기준으로 다시 계산한다.
+     */
+    mergeInto(sourceId, userId, targetId) {
+      const source = loadRide(sourceId);
+      if (source.host_id !== userId) throw forbidden('방장만 방을 합칠 수 있어요.');
+      const target = loadRide(targetId);
+      if (source.id === target.id) throw badRequest('같은 방이에요.');
+      if (source.status !== 'open' || target.status !== 'open') throw conflict('모집 중인 방끼리만 합칠 수 있어요.');
+      const movers = stmt.members.all(source.id);
+      const staying = memberIdsOf(target.id);
+      if (staying.length + movers.length > target.max_seats) throw conflict('옮겨 갈 방에 자리가 모자라요.');
+      if (Math.abs(new Date(source.depart_at) - new Date(target.depart_at)) > 60 * MIN) throw conflict('출발 시간이 너무 달라요.');
+
+      // 옮겨 갈 방 기준 하차 위치
+      const plans = movers.map((m) => {
+        const reason = eligibility(target, stmt.userById.get(m.id));
+        if (reason) throw forbidden(`${m.nickname}님: ${reason}`);
+        const place = m.dropoff_name
+          ? { name: m.dropoff_name, lat: m.dropoff_lat, lng: m.dropoff_lng }
+          : { name: source.dest_name, lat: source.dest_lat, lng: source.dest_lng };
+        if (haversineKm(place.lat, place.lng, target.dest_lat, target.dest_lng) <= SAME_DEST_KM) return { member: m, place: null, t: 1 };
+        const projected = projectOnRoute(routeOf(target), place);
+        if (projected.distanceKm > MAX_DROPOFF_DETOUR_KM) throw conflict(`${m.nickname}님의 도착지가 이 방 경로에서 너무 멀어요.`);
+        return { member: m, place, t: Math.max(0.05, Math.min(1, projected.t)) };
+      });
+
+      transaction(db, () => {
+        for (const { member, place, t } of plans) {
+          stmt.deleteMember.run(source.id, member.id);
+          stmt.insertMember.run(target.id, member.id, place?.name ?? null, place?.lat ?? null, place?.lng ?? null, t, freeSeat(target.id));
+        }
+        stmt.setStatus.run('cancelled', source.id);
+      });
+
+      const hostName = nicknameOf(userId);
+      fire(plans.map((p) => p.member.id).filter((id) => id !== userId), {
+        type: 'merged', rideId: target.id, title: '🔀 합승방이 합쳐졌어요',
+        body: `${hostName}님이 비슷한 방과 합쳤어요. 새 만남 장소를 확인해 주세요.`,
+      });
+      fire(staying, {
+        type: 'join', rideId: target.id, title: '👋 새 동승자',
+        body: `비슷한 방에서 ${plans.length}명이 합류했어요 (${staying.length + plans.length}/${target.max_seats}명)`,
+      });
+      return service.get(target.id, userId);
     },
 
     /** 좌석 바꾸기 (탑승 전) */

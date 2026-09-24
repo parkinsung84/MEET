@@ -197,6 +197,26 @@ CREATE TABLE IF NOT EXISTS location_usage_logs (
   created_at TEXT NOT NULL
 );
 
+-- 자동 매칭 요청: "이 경로로 이 시간 안에 같이 탈 사람" — 맞는 방에 자동 참여하거나 요청끼리 방을 만든다
+CREATE TABLE IF NOT EXISTS ride_requests (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  origin_name TEXT NOT NULL,
+  origin_lat  REAL NOT NULL,
+  origin_lng  REAL NOT NULL,
+  dest_name   TEXT NOT NULL,
+  dest_lat    REAL NOT NULL,
+  dest_lng    REAL NOT NULL,
+  window_from TEXT NOT NULL,
+  window_to   TEXT NOT NULL,
+  radius_km   REAL NOT NULL,
+  org_only    INTEGER NOT NULL DEFAULT 0,
+  status      TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'matched', 'cancelled', 'expired')),
+  ride_id     INTEGER REFERENCES rides(id) ON DELETE SET NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ride_requests_status ON ride_requests(status, window_to);
 CREATE INDEX IF NOT EXISTS idx_location_logs_user ON location_usage_logs(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_location_logs_time ON location_usage_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_withdrawn_phone ON withdrawn_accounts(phone_hash);

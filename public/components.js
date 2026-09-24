@@ -125,6 +125,23 @@ export function trustChips(user) {
   ];
 }
 
+/** "혼자 11,600원 → 합승 3,870원 · 7,730원 절약" — 합승할 이유를 한눈에 */
+export function savingsLine(total, share, atLeast = false) {
+  const saved = total - share;
+  // 아직 혼자면 줄 그을 게 없으니, 한 명만 더 오면 얼마인지 보여준다
+  if (saved <= 0) {
+    return h('div', { class: 'savings' },
+      h('span', {}, `아직 혼자예요 · 한 명만 더 오면 `),
+      h('strong', {}, won(Math.ceil(total / 2 / 10) * 10)),
+      h('span', { class: 'chip saved' }, `💰 ${won(total - Math.ceil(total / 2 / 10) * 10)} 절약`));
+  }
+  return h('div', { class: 'savings' },
+    h('span', { class: 'solo' }, `혼자 ${won(total)}`),
+    h('span', { class: 'arrow' }, '→'),
+    h('strong', {}, `${atLeast ? '1인 ' : '내 몫 '}${won(share)}${atLeast ? '~' : ''}`),
+    saved > 0 && h('span', { class: 'chip saved' }, `💰 ${won(saved)} 절약`));
+}
+
 export function rideCard(ride) {
   const seatsLeft = ride.maxSeats - ride.memberCount;
   const soon = ride.status === 'open' && new Date(ride.departAt).getTime() - Date.now() < 60 * 60 * 1000;
@@ -133,10 +150,8 @@ export function rideCard(ride) {
     h('div', { class: 'muted' },
       soon && h('strong', { class: 'soon' }, `${relativeTime(ride.departAt)} · `),
       `${formatTime(ride.departAt)} 출발 · ${routeSummary(ride.fare)}`),
+    savingsLine(ride.fare.total, ride.fare.mine ?? ride.fare.perPersonFull, !ride.fare.mine),
     h('div', { class: 'chips' },
-      ride.fare.mine
-        ? h('span', { class: 'chip hl' }, `내 예상 ${won(ride.fare.mine)}`)
-        : h('span', { class: 'chip hl' }, `1인 ${won(ride.fare.perPersonFull)}~`),
       h('span', { class: 'chip' }, ride.status === 'open' ? `${ride.memberCount}/${ride.maxSeats}명 · ${seatsLeft}자리` : STATUS_LABEL[ride.status]),
       ride.match?.type === 'onTheWay' && h('span', { class: 'chip ok' }, '가는 길에 하차'),
       ride.joined && h('span', { class: 'chip ok' }, '참여 중'),

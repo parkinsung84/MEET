@@ -1,6 +1,6 @@
-import { placePicker, toLocalInput } from '../components.js';
+import { placePicker, rideCard, toLocalInput } from '../components.js';
 import { api, state } from '../core.js';
-import { h, toast } from '../ui.js';
+import { h, sheet, toast } from '../ui.js';
 
 export function newRideScreen() {
   const origin = placePicker('출발지', { allowCurrent: true });
@@ -49,12 +49,31 @@ export function newRideScreen() {
     h('button', {}, '합승방 만들기'),
   );
 
+  /** 비슷한 방이 이미 있으면 먼저 보여주고, 그래도 만들지 물어본다 → 만들면 true */
+  async function confirmNoSimilar(o, d, departAt) {
+    const params = new URLSearchParams({ originLat: o.lat, originLng: o.lng, destLat: d.lat, destLng: d.lng, departAt });
+    const { rides } = await api('GET', `/rides/similar?${params}`).catch(() => ({ rides: [] }));
+    if (!rides.length) return true;
+    return new Promise((resolve) => {
+      sheet('🙌 비슷한 방이 이미 있어요', h('div', { class: 'stack' },
+        h('p', {}, '같은 방향으로 가는 방에 참여하면 더 빨리 모이고 요금도 더 싸져요.'),
+        rides.slice(0, 3).map((r) => {
+          const card = rideCard(r);
+          card.addEventListener('click', () => resolve(false));
+          return card;
+        })), [
+        { label: '그래도 새로 만들기', class: 'secondary', onClick: (close) => { close(); resolve(true); } },
+      ]);
+    });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
       const o = origin.value();
       const d = dest.value();
       if (!o || !d) throw new Error('출발지와 도착지를 입력해 주세요.');
+      if (!await confirmNoSimilar(o, d, new Date(form.departAt.value).toISOString())) return;
       const { ride } = await api('POST', '/rides', {
         origin: o,
         destination: d,

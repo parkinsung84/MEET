@@ -1,11 +1,12 @@
 import { Router } from 'express';
+import { badRequest } from '../errors.js';
 
 /**
  * rides: ride service, users: 사용자 서비스(평가), alerts: 경로 알림, inquiries: 참여 전 문의
  * changed(rideId): 방 상태가 바뀌었을 때 실시간 갱신을 보내는 콜백
  * inquiryPosted(message): 문의 메시지를 실시간으로 전달하는 콜백
  */
-export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, inquiryPosted }) {
+export function ridesRouter({ rides, users, alerts, inquiries, auth, matcher, changed, inquiryPosted }) {
   const router = Router();
   router.use(auth.required);
 
@@ -16,7 +17,24 @@ export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, in
   };
 
   router.get('/', (req, res) => {
-    res.json({ rides: rides.search(req.query, req.userId) });
+    const { originLat, originLng, destLat, destLng, from, to } = req.query;
+    const ridesFound = rides.search(req.query, req.userId);
+    // 출발지·도착지를 모두 주면 "이 경로를 찾는 사람 수"도 함께
+    const demand = originLat && destLat
+      ? matcher.demand({ origin: { lat: Number(originLat), lng: Number(originLng) }, destination: { lat: Number(destLat), lng: Number(destLng) }, from, to }, req.userId)
+      : null;
+    res.json({ rides: ridesFound, demand });
+  });
+
+  // 방 만들기 전 확인: 출발·도착 1km, 출발 시간 ±20분 안의 비슷한 방
+  router.get('/similar', (req, res) => {
+    const at = Date.parse(req.query.departAt);
+    if (!Number.isFinite(at)) throw badRequest('출발 시간이 올바르지 않습니다.');
+    const found = rides.search({
+      ...req.query, radiusKm: 1,
+      from: new Date(at - 20 * 60 * 1000).toISOString(), to: new Date(at + 20 * 60 * 1000).toISOString(),
+    }, req.userId, { log: false }).filter((r) => !r.joined);
+    res.json({ rides: found });
   });
 
   router.get('/mine', (req, res) => {
@@ -27,6 +45,8 @@ export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, in
     const ride = await rides.create(req.userId, req.body);
     notifyChange(ride.id);
     alerts.dispatch(ride.id);
+    // 기다리던 매칭 요청을 이 방에 넣고, 비슷한 방 방장들에게 알림
+    matcher.onRideCreated(ride.id).catch((err) => console.error('[matcher]', err));
     res.status(201).json({ ride });
   });
 
@@ -53,6 +73,13 @@ export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, in
 
   router.post('/:id/settlement/paid', (req, res) => {
     respond(res, rides.markPaid(req.params.id, req.userId, req.body?.userId ?? req.userId));
+  });
+
+  router.get('/:id/similar', (req, res) => res.json({ rides: rides.similarRides(req.params.id, req.userId) }));
+  router.post('/:id/merge', (req, res) => {
+    const ride = rides.mergeInto(req.params.id, req.userId, req.body?.targetId);
+    notifyChange(Number(req.params.id));
+    respond(res, ride);
   });
 
   router.put('/:id/seat', (req, res) => respond(res, rides.setSeat(req.params.id, req.userId, req.body?.seat)));

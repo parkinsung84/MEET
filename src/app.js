@@ -10,6 +10,7 @@ import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
 import { createInquiryService } from './inquiries.js';
 import { createLocationLog } from './location-log.js';
+import { createMatcher } from './matcher.js';
 import { createMailer } from './mailer.js';
 import { createNaverClient } from './naver.js';
 import { createNotifier } from './notifier.js';
@@ -92,6 +93,8 @@ export function createApp({
   });
   const calls = createCallService(io, { rides, users, notifier, ringTimeoutMs: callRingTimeoutMs });
   const realtime = attachRealtime(io, rides, auth, { calls });
+  const rideChanged = (rideId) => realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
+  const matcher = createMatcher(db, { rides, users, notifier, onChange: rideChanged });
 
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(PUBLIC_DIR));
@@ -115,8 +118,12 @@ export function createApp({
   app.use('/api/notifications', notificationsRouter(notifier, auth));
   app.use('/api/alerts', alertsRouter(alerts, users, auth));
   app.use('/api/places', placesRouter(naver, auth, locationLog));
+  // 자동 매칭 요청
+  app.post('/api/matching', auth.required, async (req, res) => res.status(201).json({ request: await matcher.request(req.userId, req.body) }));
+  app.get('/api/matching', auth.required, (req, res) => res.json({ request: matcher.current(req.userId) }));
+  app.delete('/api/matching', auth.required, (req, res) => res.json({ request: matcher.cancel(req.userId) }));
   app.use('/api/rides', ridesRouter({
-    rides, users, alerts, inquiries, auth,
+    rides, users, alerts, inquiries, auth, matcher,
     changed: realtime.rideChanged,
     inquiryPosted: realtime.inquiryPosted,
   }));
@@ -132,14 +139,16 @@ export function createApp({
 
   /** 주기 작업 1회 실행: 출발 알림, 방 자동 정리, 만료된 경로 알림 삭제 */
   function tick(now = Date.now()) {
-    for (const rideId of rides.tick(now)) realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
+    for (const rideId of rides.tick(now)) rideChanged(rideId);
     alerts.purgeExpired(now);
     account.purgeExpired(now);
     locationLog.purgeExpired(now);
+    // 자동 매칭: 만료 처리와 대기 요청 재시도 (비동기 — 테스트에서는 await 가능)
+    return matcher.tick(now).catch((err) => console.error('[matcher]', err));
   }
 
   return {
-    app, server, db, io, tick, calls,
+    app, server, db, io, tick, calls, matcher,
     startScheduler() {
       const timer = setInterval(() => {
         try { tick(); } catch (err) { console.error('[scheduler]', err); }

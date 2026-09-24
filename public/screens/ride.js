@@ -1,5 +1,5 @@
 import { startCall } from '../call.js';
-import { genderChip, placePicker, routeSummary, trustChips } from '../components.js';
+import { genderChip, placePicker, routeSummary, savingsLine, trustChips } from '../components.js';
 import { api, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, SEAT_LABEL, state, STATUS_LABEL, won } from '../core.js';
 import { mapsAvailable, renderRouteMap } from '../maps.js';
 import { ask, copyText, h, sheet, toast } from '../ui.js';
@@ -429,10 +429,51 @@ export function rideScreen(rideId) {
     return el;
   }
 
+  // ---------- 비슷한 방 합치기 ----------
+  let similar = [];
+  let similarKey = '';
+  async function loadSimilar() {
+    if (!isMember() || ride.status !== 'open') return;
+    const key = `${ride.id}|${ride.memberCount}|${ride.status}`;
+    try {
+      ({ rides: similar } = await api('GET', `/rides/${ride.id}/similar`));
+    } catch { similar = []; }
+    if (key !== similarKey) similarKey = key;
+    const box = root.querySelector('#similar-rides');
+    if (box) box.replaceWith(similarCard());
+  }
+
+  function similarCard() {
+    if (!isMember() || ride.status !== 'open' || !similar.length) return h('div', { id: 'similar-rides' });
+    const n = ride.memberCount;
+    return h('div', { class: 'card stack similar', id: 'similar-rides' },
+      h('h2', {}, '🔀 비슷한 방이 있어요'),
+      h('p', { class: 'muted' }, isHost()
+        ? '방을 합치면 한 대로 같이 가서 1인당 요금이 줄어요. 합치면 이 방 멤버 모두 그 방으로 옮겨지고, 멤버들에게 알림이 가요.'
+        : '방장이 합치기를 누르면 모두 함께 그 방으로 옮겨가요. 채팅으로 방장에게 제안해 보세요.'),
+      similar.slice(0, 3).map((r) => {
+        const after = r.memberCount + n;
+        return h('div', { class: 'similar-row' },
+          h('a', { href: `#/rides/${r.id}` },
+            h('strong', {}, `${r.origin.name} → ${r.destination.name}`),
+            h('div', { class: 'muted' }, `${formatTime(r.departAt)} · ${r.memberCount}/${r.maxSeats}명 → 합치면 ${after}명`)),
+          savingsLine(r.fare.total, Math.ceil(r.fare.total / after / 10) * 10, true),
+          isHost() && h('button', {
+            class: 'small',
+            onclick: async () => {
+              if (!await ask('이 방으로 합칠까요?', `이 방 멤버 ${n}명이 모두 "${r.origin.name} → ${r.destination.name}" 방으로 옮겨가고, 지금 방은 닫혀요.`, { confirmLabel: '합치기' })) return;
+              const data = await action(() => api('POST', `/rides/${ride.id}/merge`, { targetId: r.id }), '방을 합쳤어요!');
+              if (data?.ride) location.hash = `#/rides/${data.ride.id}`;
+            },
+          }, '이 방으로 합치기'));
+      }));
+  }
+
   function fareCard() {
     const myShare = ride.fare.shares?.[me()];
     return h('div', { class: 'card' },
       h('h2', {}, '💰 예상 요금'),
+      myShare !== undefined && savingsLine(ride.fare.total, myShare),
       h('div', { class: 'fare' },
         h('div', {}, h('span', { class: 'muted' }, '전체'), h('strong', {}, won(ride.fare.total))),
         myShare !== undefined
@@ -548,6 +589,7 @@ export function rideScreen(rideId) {
         ride.memo && h('p', {}, ride.memo),
         !isMember() && h('p', { class: 'muted' }, '참여하면 정확한 만남 장소와 채팅이 열려요.')),
       nextStepCard(),
+      similarCard(),
       boardingCard(),
       guestInquiryCard(),
       threadsCard(),
@@ -564,6 +606,11 @@ export function rideScreen(rideId) {
     if (focused?.isConnected) focused.focus();
     await subscribeChat();
     if (canInquire()) await loadGuestInquiry();
+    // 인원이 바뀌면 합칠 수 있는 방도 다시 확인
+    if (isMember() && ride.status === 'open' && similarKey !== `${ride.id}|${ride.memberCount}|${ride.status}`) {
+      similarKey = `${ride.id}|${ride.memberCount}|${ride.status}`;
+      loadSimilar();
+    }
     if (isMember() && !threadsLoaded) {
       threadsLoaded = true;
       loadThreads().catch(() => {});
