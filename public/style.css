@@ -1,0 +1,89 @@
+:root {
+  --brand: #ffc400;
+  --brand-ink: #1a1a1a;
+  --bg: #f5f5f4;
+  --card: #ffffff;
+  --ink: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --danger: #dc2626;
+  --ok: #16a34a;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --card: #1c1917;
+    --ink: #f5f5f4;
+    --muted: #a8a29e;
+    --line: #292524;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard', 'Noto Sans KR', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.5;
+}
+a { color: inherit; }
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--brand); color: var(--brand-ink);
+}
+.logo { font-weight: 800; font-size: 1.2rem; text-decoration: none; }
+#nav { display: flex; align-items: center; gap: 12px; font-size: .9rem; }
+#nav a, #nav button { color: var(--brand-ink); background: none; border: 0; font: inherit; cursor: pointer; text-decoration: none; }
+main { max-width: 640px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.3rem; margin: 8px 0 16px; }
+h2 { font-size: 1.05rem; margin: 0 0 12px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; margin-bottom: 12px;
+}
+.stack { display: grid; gap: 12px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; min-width: 0; }
+.row > .fit { flex: 0 0 auto; }
+.muted { color: var(--muted); font-size: .88rem; }
+label { display: grid; gap: 4px; font-size: .88rem; color: var(--muted); }
+input, select, textarea {
+  width: 100%; padding: 11px 12px; font: inherit; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+button, .btn {
+  display: inline-flex; justify-content: center; align-items: center; gap: 6px;
+  padding: 11px 16px; font: inherit; font-weight: 700; cursor: pointer;
+  border: 0; border-radius: 10px; background: var(--brand); color: var(--brand-ink); text-decoration: none;
+  white-space: nowrap;
+}
+button.secondary { background: var(--line); color: var(--ink); }
+button.danger { background: var(--danger); color: #fff; }
+button.small { padding: 6px 10px; font-size: .85rem; }
+button:disabled { opacity: .5; cursor: default; }
+.ride-card { display: block; text-decoration: none; }
+.route { font-weight: 700; font-size: 1.05rem; }
+.route .arrow { color: var(--muted); margin: 0 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { font-size: .78rem; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.chip.hl { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); font-weight: 700; }
+.fare { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; gap: 8px; }
+.fare strong { display: block; font-size: 1.1rem; }
+.members { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.chat { display: grid; grid-template-rows: 1fr auto; height: 360px; }
+.chat-log { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+.msg { max-width: 80%; padding: 6px 10px; border-radius: 12px; background: var(--bg); align-self: flex-start; }
+.msg.me { align-self: flex-end; background: var(--brand); color: var(--brand-ink); }
+.msg .who { font-size: .72rem; opacity: .7; }
+.empty { text-align: center; padding: 32px 0; color: var(--muted); }
+.fab { position: fixed; right: 20px; bottom: 24px; border-radius: 999px; padding: 14px 20px; box-shadow: 0 4px 14px rgb(0 0 0 / .2); }
+#toast {
+  position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%);
+  background: #292524; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: .9rem;
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+#toast.show { opacity: 1; }
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tabs button { flex: 1; }
