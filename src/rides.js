@@ -558,6 +558,11 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       return Boolean(user?.email_verified) && !stmt.member.get(ride.id, userId) && !eligibility(ride, user);
     },
 
+    /** 참여할 수 없는 사유 (성별·소속·차단), 가능하면 null */
+    eligibilityReason(rideId, userId) {
+      return eligibility(loadRide(rideId), stmt.userById.get(userId));
+    },
+
     rideRow(rideId) {
       return loadRide(rideId);
     },

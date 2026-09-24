@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS ride_alerts (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 참여 전 문의: 합승방마다 문의자(guest)별 1:1 대화. 기존 멤버 누구나 답할 수 있다.
+CREATE TABLE IF NOT EXISTS inquiry_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ride_id    INTEGER NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+  guest_id   INTEGER NOT NULL REFERENCES users(id),
+  sender_id  INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_inquiry_thread ON inquiry_messages(ride_id, guest_id, id);
 CREATE INDEX IF NOT EXISTS idx_rides_status_depart ON rides(status, depart_at);
 CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);

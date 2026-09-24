@@ -12,8 +12,7 @@ export function myRidesScreen() {
       root.append(
         h('h2', {}, '진행 중'),
         ...(active.length ? active.map(rideCard) : [h('div', { class: 'empty' }, '진행 중인 합승이 없어요.')]),
-        past.length && h('h2', {}, '지난 합승'),
-        ...past.map(rideCard),
+        ...(past.length ? [h('h2', {}, '지난 합승'), ...past.map(rideCard)] : []),
       );
     })
     .catch((err) => toast(err.message));

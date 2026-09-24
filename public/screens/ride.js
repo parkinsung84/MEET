@@ -23,18 +23,118 @@ export function rideScreen(rideId) {
   let ride = null;
   let myRatings = [];
   let subscribed = false;
+  // 참여 전 문의: 문의자(나)의 대화 / 멤버가 보는 문의 목록과 열려 있는 대화
+  const inquiryLog = h('div', { class: 'chat-log' });
+  let inquiryLoaded = false;
+  let inquirySubscribed = false;
+  let threads = [];
+  let threadsLoaded = false;
+  let openThread = null; // { guestId, log }
 
   const me = () => state.user.id;
   const isMember = () => ride?.members.some((m) => m.id === me());
   const isHost = () => ride?.hostId === me();
   const myMember = () => ride?.members.find((m) => m.id === me());
 
-  function appendMessage(msg) {
-    const mine = msg.userId === me();
-    chatLog.append(h('div', { class: `msg${mine ? ' me' : ''}` },
-      !mine && h('div', { class: 'who' }, msg.nickname),
-      msg.body));
-    chatLog.scrollTop = chatLog.scrollHeight;
+  function bubble(log, senderId, nickname, body) {
+    const mine = senderId === me();
+    log.append(h('div', { class: `msg${mine ? ' me' : ''}` },
+      !mine && h('div', { class: 'who' }, nickname),
+      body));
+    log.scrollTop = log.scrollHeight;
+  }
+  const appendMessage = (msg) => bubble(chatLog, msg.userId, msg.nickname, msg.body);
+  const appendInquiry = (log, msg) => bubble(log, msg.senderId, msg.nickname, msg.body);
+
+  /** 채팅 입력줄. send(text)가 성공하면 입력창을 비운다 */
+  function composer(placeholder, send) {
+    const input = h('input', { placeholder, maxlength: 500, autocomplete: 'off' });
+    const form = h('form', { class: 'row' }, input, h('button', { class: 'fit' }, '전송'));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      try {
+        await send(input.value);
+        input.value = '';
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    return { form, input };
+  }
+
+  // ---------- 참여 전 문의 ----------
+
+  async function loadGuestInquiry() {
+    if (!inquirySubscribed) {
+      await emit('inquiry:subscribe', ride.id);
+      inquirySubscribed = true;
+    }
+    if (inquiryLoaded) return;
+    const { messages } = await api('GET', `/rides/${ride.id}/inquiries/${me()}`);
+    inquiryLoaded = true;
+    inquiryLog.replaceChildren();
+    messages.forEach((m) => appendInquiry(inquiryLog, m));
+  }
+
+  const canInquire = () => !isMember() && ride.status === 'open' && state.user.verified;
+  // 입력 중인 글이 다시 그리기로 지워지지 않도록 카드는 한 번만 만들어 재사용한다
+  let inquiryInput = null;
+  let guestCard = null;
+  function guestInquiryCard() {
+    if (!canInquire()) return null;
+    if (guestCard) return guestCard;
+    const { form, input } = composer('예: 캐리어 있어도 될까요? / 5분 늦어도 괜찮나요?',
+      (text) => api('POST', `/rides/${ride.id}/inquiries/${me()}`, { body: text }));
+    inquiryInput = input;
+    guestCard = h('div', { class: 'card', id: 'inquiry' },
+      h('h2', {}, '💬 참여 전 문의'),
+      h('p', { class: 'muted' }, '참여하기 전에 방 멤버들에게 궁금한 점을 물어보고 조율해 보세요. 이 대화는 나와 방 멤버만 볼 수 있어요.'),
+      h('div', { class: 'chat inquiry-chat' }, inquiryLog, form));
+    return guestCard;
+  }
+
+  async function loadThreads() {
+    if (!isMember()) return;
+    ({ threads } = await api('GET', `/rides/${ride.id}/inquiries`));
+    const box = root.querySelector('#inquiry-threads');
+    if (box) box.replaceWith(threadsCard());
+  }
+
+  function openThreadSheet(thread) {
+    const log = h('div', { class: 'chat-log' });
+    openThread = { guestId: thread.guest.id, log };
+    const { form } = composer(thread.joined ? '참여한 사람은 합승 채팅에서 대화해요' : '답장 입력',
+      (text) => api('POST', `/rides/${ride.id}/inquiries/${thread.guest.id}`, { body: text }));
+    const close = sheet(`${thread.guest.nickname}님의 문의`, h('div', { class: 'stack' },
+      h('div', { class: 'chips' }, trustChips(thread.guest)),
+      h('div', { class: 'chat inquiry-chat' }, log, !thread.joined && ride.status === 'open' && form)));
+    // 시트가 닫히면 열린 대화 해제
+    const observer = new MutationObserver(() => {
+      if (!log.isConnected) {
+        openThread = null;
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true });
+    api('GET', `/rides/${ride.id}/inquiries/${thread.guest.id}`)
+      .then(({ messages }) => messages.forEach((m) => appendInquiry(log, m)))
+      .catch((err) => { toast(err.message); close(); });
+  }
+
+  function threadsCard() {
+    if (!isMember()) return null;
+    // 문의가 없어도 자리를 남겨 두어 새 문의가 오면 이 자리에 그린다
+    if (!threads.length) return h('div', { id: 'inquiry-threads' });
+    const waiting = threads.filter((t) => t.awaitingReply && !t.joined).length;
+    return h('div', { class: 'card', id: 'inquiry-threads' },
+      h('h2', {}, `💬 참여 문의 ${threads.length}건`, waiting > 0 && h('span', { class: 'chip warn' }, `답장 대기 ${waiting}`)),
+      h('ul', { class: 'members' }, threads.map((t) => h('li', { class: 'thread', onclick: () => openThreadSheet(t) },
+        h('div', { class: 'member-name' },
+          t.guest.nickname,
+          t.joined && h('span', { class: 'chip ok' }, '참여함'),
+          t.awaitingReply && !t.joined && h('span', { class: 'chip hl' }, '답장 대기')),
+        h('div', { class: 'muted preview' }, `${t.lastMessage.senderId === t.guest.id ? '' : `${t.lastMessage.nickname}: `}${t.lastMessage.body}`)))));
   }
 
   /** API 호출 후 응답의 ride 로 다시 그린다 */
@@ -176,7 +276,9 @@ export function rideScreen(rideId) {
       const full = ride.memberCount >= ride.maxSeats;
       if (!state.user.verified) return h('a', { class: 'card step warn', href: '#/verify' }, '📧 이메일 인증 후 참여할 수 있어요.');
       return h('div', { class: 'card step' },
-        h('button', { class: 'wide', disabled: full, onclick: openJoinSheet }, full ? '정원 마감' : '합승 참여하기'));
+        h('div', { class: 'row' },
+          h('button', { class: 'secondary', onclick: () => { inquiryInput?.focus(); inquiryInput?.scrollIntoView({ block: 'center' }); } }, '💬 먼저 물어보기'),
+          h('button', { disabled: full, onclick: openJoinSheet }, full ? '정원 마감' : '합승 참여하기')));
     }
     if (ride.status === 'open') {
       const arrived = myMember()?.arrived;
@@ -298,20 +400,20 @@ export function rideScreen(rideId) {
         h('button', { class: current(m.id) === false ? 'small danger' : 'secondary small', onclick: () => rate(m.id, false) }, '👎 별로예요')))));
   }
 
+  let chatCard = null;
   function chatPanel() {
-    const input = h('input', { placeholder: '메시지 입력', maxlength: 500, autocomplete: 'off' });
-    const form = h('form', { class: 'row' }, input, h('button', { class: 'fit' }, '전송'));
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!input.value.trim()) return;
-      const res = await emit('chat:send', { rideId: ride.id, body: input.value });
-      if (!res.ok) return toast(res.error);
-      input.value = '';
+    if (chatCard) return chatCard;
+    const { form } = composer('메시지 입력', async (text) => {
+      const res = await emit('chat:send', { rideId: ride.id, body: text });
+      if (!res.ok) throw new Error(res.error);
     });
-    return h('div', { class: 'card' }, h('h2', {}, '💬 합승 채팅'), h('div', { class: 'chat' }, chatLog, form));
+    chatCard = h('div', { class: 'card' }, h('h2', {}, '💬 합승 채팅'), h('div', { class: 'chat' }, chatLog, form));
+    return chatCard;
   }
 
   async function render() {
+    // 다시 그려도 입력 중이던 칸의 포커스를 유지
+    const focused = root.contains(document.activeElement) ? document.activeElement : null;
     // h()가 null/false 자식을 걸러주므로 한 번 감싸서 넣는다
     root.replaceChildren(h('div', {},
       h('div', { class: 'card' },
@@ -324,36 +426,69 @@ export function rideScreen(rideId) {
         ride.memo && h('p', {}, ride.memo),
         !isMember() && h('p', { class: 'muted' }, '참여하면 정확한 만남 장소와 채팅이 열려요.')),
       nextStepCard(),
+      guestInquiryCard(),
+      threadsCard(),
       settlementCard(),
       ratingCard(),
       !ride.settlement && fareCard(),
       membersCard(),
       isMember() && chatPanel(),
     ));
+    if (focused?.isConnected) focused.focus();
     await subscribeChat();
+    if (canInquire()) await loadGuestInquiry();
+    if (isMember() && !threadsLoaded) {
+      threadsLoaded = true;
+      loadThreads().catch(() => {});
+    }
   }
 
   listen(window, 'rides:changed', () => {
     // 멤버가 아닐 때는 소켓 방에 없으므로 목록 변경 이벤트로 새로 불러온다
-    if (ride && !isMember()) api('GET', `/rides/${ride.id}`).then((d) => { ({ ride } = d); render(); }).catch(() => {});
+    // (다른 방의 변경일 수도 있으므로 실제로 달라졌을 때만 다시 그린다)
+    if (ride && !isMember()) {
+      api('GET', `/rides/${ride.id}`).then((d) => {
+        if (JSON.stringify(d.ride) === JSON.stringify(ride)) return;
+        ({ ride } = d);
+        render();
+      }).catch(() => {});
+    }
   });
   const onUpdated = (updated) => {
     if (updated.id !== ride?.id) return;
     ride = updated;
     render();
+    // 문의한 사람이 참여하면 목록에 '참여함'으로 바뀌도록
+    if (isMember() && threads.length) loadThreads().catch(() => {});
   };
   const onMessage = (msg) => msg.rideId === ride?.id && appendMessage(msg);
+  const onInquiry = (msg) => {
+    if (msg.rideId !== ride?.id) return;
+    if (!isMember()) {
+      if (msg.guestId === me()) appendInquiry(inquiryLog, msg);
+      return;
+    }
+    if (openThread?.guestId === msg.guestId) appendInquiry(openThread.log, msg);
+    loadThreads().catch(() => {});
+  };
   state.socket.on('ride:updated', onUpdated);
   state.socket.on('chat:message', onMessage);
+  state.socket.on('inquiry:message', onInquiry);
   onLeave(() => {
     state.socket?.off('ride:updated', onUpdated);
     state.socket?.off('chat:message', onMessage);
+    state.socket?.off('inquiry:message', onInquiry);
     if (subscribed) state.socket?.emit('ride:unsubscribe', ride.id);
+    if (inquirySubscribed) state.socket?.emit('inquiry:unsubscribe', ride.id);
   });
 
   Promise.all([api('GET', `/rides/${rideId}`), state.mapsReady])
-    .then(([data]) => {
+    .then(async ([data]) => {
       ({ ride, myRatings } = data);
+      if (ride.members.some((m) => m.id === me())) {
+        threads = (await api('GET', `/rides/${ride.id}/inquiries`).catch(() => ({ threads: [] }))).threads;
+        threadsLoaded = true;
+      }
       if (mapsAvailable()) {
         mapCard.hidden = false;
         renderRouteMap(mapEl, ride);

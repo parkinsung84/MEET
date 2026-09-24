@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { requireAuth } from '../auth.js';
 
 /**
- * rides: ride service, users: 사용자 서비스(평가), alerts: 경로 알림
+ * rides: ride service, users: 사용자 서비스(평가), alerts: 경로 알림, inquiries: 참여 전 문의
  * changed(rideId): 방 상태가 바뀌었을 때 실시간 갱신을 보내는 콜백
+ * inquiryPosted(message): 문의 메시지를 실시간으로 전달하는 콜백
  */
-export function ridesRouter({ rides, users, alerts, secret, changed }) {
+export function ridesRouter({ rides, users, alerts, inquiries, secret, changed, inquiryPosted }) {
   const router = Router();
   router.use(requireAuth(secret));
 
@@ -57,6 +58,19 @@ export function ridesRouter({ rides, users, alerts, secret, changed }) {
 
   router.post('/:id/ratings', (req, res) => {
     res.json({ myRatings: users.rate(req.params.id, req.userId, req.body?.ratings) });
+  });
+
+  // 참여 전 문의 — 멤버: 문의 목록, 문의자/멤버: 대화 보기·보내기
+  router.get('/:id/inquiries', (req, res) => {
+    res.json({ threads: inquiries.threads(req.params.id, req.userId) });
+  });
+  router.get('/:id/inquiries/:guestId', (req, res) => {
+    res.json({ messages: inquiries.messages(req.params.id, req.params.guestId, req.userId) });
+  });
+  router.post('/:id/inquiries/:guestId', (req, res) => {
+    const message = inquiries.post(req.params.id, req.params.guestId, req.userId, req.body?.body);
+    inquiryPosted(message);
+    res.status(201).json({ message });
   });
 
   router.get('/:id/messages', (req, res) => {

@@ -24,10 +24,10 @@ export function createNotifier(db, { push = null, log = console } = {}) {
     read: Boolean(n.read_at), createdAt: n.created_at,
   });
 
-  /** 채팅방(소켓 room)에 지금 들어와 있는 사용자 id */
-  async function usersInRideRoom(rideId) {
+  /** 소켓 room 에 지금 들어와 있는 사용자 id */
+  async function usersInRoom(room) {
     if (!io) return new Set();
-    const sockets = await io.in(`ride:${rideId}`).fetchSockets();
+    const sockets = await io.in(room).fetchSockets();
     return new Set(sockets.map((s) => s.data.userId));
   }
 
@@ -48,11 +48,13 @@ export function createNotifier(db, { push = null, log = console } = {}) {
 
     /**
      * userIds 에게 알림. skipViewers: 해당 합승 채팅방을 보고 있는 사람은 건너뜀 (채팅 등 빈번한 알림용)
+     * skipRoom: 이 소켓 room 을 보고 있는 사람은 건너뜀 (참여 문의 대화 등)
      * store: false 면 알림함에 남기지 않음 (채팅 메시지 — 채팅 내역이 이미 있으므로)
      */
-    async notify(userIds, { type, title, body, rideId = null, skipViewers = false, store = true }) {
+    async notify(userIds, { type, title, body, rideId = null, skipViewers = false, skipRoom = null, store = true }) {
       const url = rideId ? `/#/rides/${rideId}` : '/#/notifications';
-      const viewers = skipViewers && rideId ? await usersInRideRoom(rideId) : new Set();
+      const room = skipRoom ?? (skipViewers && rideId ? `ride:${rideId}` : null);
+      const viewers = room ? await usersInRoom(room) : new Set();
       await Promise.all([...new Set(userIds)].filter((id) => !viewers.has(id)).map(async (userId) => {
         let notification = { type, title, body, url, rideId };
         if (store) {

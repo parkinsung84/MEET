@@ -41,7 +41,7 @@ export function sheet(title, content, actions = []) {
     h('div', { class: 'sheet', role: 'dialog', 'aria-label': title },
       h('div', { class: 'sheet-head' }, h('strong', {}, title), h('button', { class: 'secondary small', 'aria-label': '닫기', onclick: close }, '✕')),
       h('div', { class: 'sheet-body' }, content),
-      actions.length && h('div', { class: 'row sheet-actions' },
+      actions.length > 0 && h('div', { class: 'row sheet-actions' },
         actions.map((a) => h('button', { class: a.class ?? '', onclick: () => a.onClick(close) }, a.label)))));
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);

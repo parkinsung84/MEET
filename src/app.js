@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { createAlertService } from './alerts.js';
 import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
+import { createInquiryService } from './inquiries.js';
 import { createMailer } from './mailer.js';
 import { createNaverClient } from './naver.js';
 import { createNotifier } from './notifier.js';
@@ -49,6 +50,7 @@ export function createApp({
       : null,
   });
   const alerts = createAlertService(db, { rides, notifier });
+  const inquiries = createInquiryService(db, { rides, users, notifier });
 
   const app = express();
   const server = createServer(app);
@@ -68,7 +70,11 @@ export function createApp({
   app.use('/api/notifications', notificationsRouter(notifier, secret));
   app.use('/api/alerts', alertsRouter(alerts, users, secret));
   app.use('/api/places', placesRouter(naver, secret));
-  app.use('/api/rides', ridesRouter({ rides, users, alerts, secret, changed: realtime.rideChanged }));
+  app.use('/api/rides', ridesRouter({
+    rides, users, alerts, inquiries, secret,
+    changed: realtime.rideChanged,
+    inquiryPosted: realtime.inquiryPosted,
+  }));
   app.use('/api', (req, res) => res.status(404).json({ error: '존재하지 않는 API입니다.' }));
 
   // Express 5 forwards thrown errors (sync and async) here.

@@ -165,3 +165,9 @@ button.link { background: none; color: var(--muted); font-weight: 400; text-deco
 }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sheet-actions { margin-top: 16px; }
+
+/* ---------- 참여 전 문의 ---------- */
+.inquiry-chat { height: 260px; }
+.thread { cursor: pointer; }
+.thread .preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inquiry-threads h2 { display: flex; align-items: center; gap: 8px; }
