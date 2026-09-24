@@ -87,6 +87,7 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `JWT_SECRET` | 토큰 서명 키. 운영 환경에서는 반드시 설정 |
 | `NODE_ENV` | `production` 이면 개발용 인증번호 화면 노출이 꺼짐 (운영 필수) |
 | `NCP_ACCESS_KEY` / `NCP_SECRET_KEY` / `NCP_SENS_SERVICE_ID` / `SMS_FROM` | 휴대폰 인증문자 발송 (네이버 클라우드 SENS). **없으면 인증번호를 서버 콘솔에 출력**하고, 개발 모드에서는 화면에도 보여줌 |
+| `SHOW_VERIFICATION_CODES` | `1` 이면 운영 모드에서도 인증번호를 화면에 표시 — SENS 준비 전 **비공개 시범 운영 전용** |
 | `SMTP_URL` / `MAIL_FROM` | 소속(학교·회사) 인증 메일 발송용 SMTP. 없으면 콘솔 출력 |
 | `TURN_URLS` + `TURN_SECRET` (또는 `TURN_USERNAME`/`TURN_CREDENTIAL`) | 음성 통화 중계(TURN) 서버. `TURN_SECRET` 이면 coturn `use-auth-secret` 방식으로 사용자별 1시간 임시 계정 발급 |
 | `STUN_URLS` | STUN 서버 (기본 `stun:stun.l.google.com:19302`) |
@@ -94,7 +95,7 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` | 네이버 클라우드 Maps Client ID / Client Secret (선택) |
 | `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | 네이버 개발자센터 검색 API Client ID / Secret (선택) |
 
-> 🚀 **서버 배포는 [DEPLOY.md](DEPLOY.md)** — Docker + Caddy(자동 HTTPS) + 매일 백업 + (선택) coturn, 공개 전 실제 기기 확인 체크리스트 포함
+> 🚀 **가장 쉬운 배포: [RENDER.md](RENDER.md)** (저장소 연결 → 자동 배포·HTTPS·디스크). 서버를 직접 운영하려면 [DEPLOY.md](DEPLOY.md) — Docker + Caddy(자동 HTTPS) + 매일 백업 + (선택) coturn, 공개 전 실제 기기 확인 체크리스트 포함
 >
 > ⚠️ 운영 배포 시: `NODE_ENV=production`, `JWT_SECRET`, SENS 문자 설정을 반드시 하세요 (없으면 아무도 가입을 마칠 수 없음). 웹 푸시·위치·음성 통화는 **HTTPS** 에서만 동작합니다 (localhost 제외). 음성 통화를 안정적으로 쓰려면 TURN 서버(coturn 직접 운영 또는 유료 서비스)가 필요합니다.
 

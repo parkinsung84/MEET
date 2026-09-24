@@ -1,0 +1,35 @@
+# Render 블루프린트 — Render 대시보드 > New > Blueprint 에서 이 저장소를 고르면 아래대로 만들어진다.
+# 자세한 순서: RENDER.md
+services:
+  - type: web
+    name: meet
+    runtime: docker
+    region: singapore          # 한국에서 가장 가까운 리전
+    plan: starter              # 디스크(데이터 저장)를 붙이려면 유료 요금제 필요
+    healthCheckPath: /api/health
+    disk:
+      name: meet-data
+      mountPath: /data         # DB(meet.db)가 저장되는 곳 — 재배포해도 유지
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /data/meet.db
+      - key: TRUST_PROXY
+        value: "1"
+      - key: JWT_SECRET
+        generateValue: true    # 로그인 토큰 서명 키 — Render 가 자동 생성
+      # ── 휴대폰 인증 문자 (네이버 클라우드 SENS) — 블루프린트 만들 때 대시보드에서 입력 ──
+      - key: NCP_ACCESS_KEY
+        sync: false
+      - key: NCP_SECRET_KEY
+        sync: false
+      - key: NCP_SENS_SERVICE_ID
+        sync: false
+      - key: SMS_FROM
+        sync: false
+      # ── SENS 준비 전 비공개 시범 운영: 1 이면 인증번호를 화면에 표시 (공개 운영에서는 0) ──
+      - key: SHOW_VERIFICATION_CODES
+        value: "0"
+      # 선택 항목(네이버 지도, 메일, TURN 등)은 배포 후 대시보드 > Environment 에서 추가 — .env.example 참고

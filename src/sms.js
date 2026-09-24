@@ -7,7 +7,9 @@ import { createHmac } from 'node:crypto';
  *  SMS_FROM: 콘솔에 등록된 발신번호
  */
 export function createSmsSender(env = process.env, { fetch = globalThis.fetch, log = console } = {}) {
-  const { NCP_ACCESS_KEY: accessKey, NCP_SECRET_KEY: secretKey, NCP_SENS_SERVICE_ID: serviceId, SMS_FROM: from } = env;
+  // 아직 준비 전이라 배포 화면에 'none' 등을 넣어 둔 경우도 미설정으로 본다
+  const read = (key) => (/^(none|-|todo)?$/i.test((env[key] ?? '').trim()) ? '' : env[key].trim());
+  const [accessKey, secretKey, serviceId, from] = ['NCP_ACCESS_KEY', 'NCP_SECRET_KEY', 'NCP_SENS_SERVICE_ID', 'SMS_FROM'].map(read);
   if (!accessKey || !secretKey || !serviceId || !from) {
     return {
       configured: false,

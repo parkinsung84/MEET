@@ -11,6 +11,11 @@ test('SENS 미설정이면 개발용 콘솔 모드', async () => {
   assert.match(logs[0], /01012345678/);
 });
 
+test("SENS 값을 'none' 으로 넣어 두면 미설정으로 본다", () => {
+  const env = { NCP_ACCESS_KEY: 'none', NCP_SECRET_KEY: 'none', NCP_SENS_SERVICE_ID: 'none', SMS_FROM: 'none' };
+  assert.equal(createSmsSender(env, { log: { info() {} } }).configured, false);
+});
+
 test('SENS: 서명 헤더와 본문 형식', async () => {
   const calls = [];
   const fetch = async (url, init) => {

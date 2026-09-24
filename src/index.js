@@ -22,6 +22,11 @@ const sms = createSmsSender();
 if (!sms.configured) console.warn('[warn] NCP SENS 미설정: 인증문자 대신 콘솔에 인증번호를 출력합니다.');
 
 const production = process.env.NODE_ENV === 'production';
+// 문자 발송(SENS) 준비 전 비공개 시범 운영용: 인증번호를 화면에 보여준다. 공개 운영에서는 절대 켜지 말 것.
+const showCodes = process.env.SHOW_VERIFICATION_CODES === '1';
+if (production && showCodes) {
+  console.warn('[warn] SHOW_VERIFICATION_CODES=1: 인증번호가 화면에 표시됩니다. 비공개 시범 운영에서만 사용하세요.');
+}
 const { server, startScheduler } = createApp({
   dbPath: process.env.DB_PATH || 'meet.db',
   secret,
@@ -29,7 +34,7 @@ const { server, startScheduler } = createApp({
   mailer,
   sms,
   // 운영 환경에서는 절대 인증번호를 응답에 넣지 않는다
-  exposeDevCode: !production,
+  exposeDevCode: !production || showCodes,
   production,
   // Caddy 등 프록시 뒤에서 실행하면 TRUST_PROXY=1
   trustProxy: process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY : false,
