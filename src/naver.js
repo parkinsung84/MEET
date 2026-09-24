@@ -48,6 +48,7 @@ export function createNaverClient({
   mapsBaseUrl = DEFAULT_MAPS_BASE_URL,
   openApiBaseUrl = DEFAULT_OPENAPI_BASE_URL,
   fetch = globalThis.fetch,
+  directionsEnabled = true,
 } = {}) {
   const mapsEnabled = Boolean(ncpKeyId && ncpKey);
   const searchEnabled = Boolean(searchClientId && searchClientSecret);
@@ -117,6 +118,7 @@ export function createNaverClient({
   return {
     mapsEnabled,
     searchEnabled,
+    directionsEnabled: mapsEnabled && directionsEnabled,
     /** 브라우저 지도 SDK 로딩용 공개 키 (NCP 콘솔에서 Web 서비스 URL로 사용처가 제한됨) */
     mapKeyId: mapsEnabled ? ncpKeyId : null,
 
@@ -184,6 +186,8 @@ export function createNaverClient({
 
 export function naverClientFromEnv(env = process.env) {
   return createNaverClient({
+    // 길찾기(Directions 5)는 유료 — NAVER_DIRECTIONS=0 이면 쓰지 않고 직선거리로 요금 추정
+    directionsEnabled: env.NAVER_DIRECTIONS !== '0',
     ncpKeyId: env.NAVER_MAP_KEY_ID,
     ncpKey: env.NAVER_MAP_KEY,
     searchClientId: env.NAVER_SEARCH_CLIENT_ID,

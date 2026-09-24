@@ -95,6 +95,7 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | 웹 푸시 키. 비우면 최초 실행 시 자동 생성해 DB에 저장 |
 | `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` | 네이버 클라우드 Maps Client ID / Client Secret (선택) |
 | `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | 네이버 개발자센터 검색 API Client ID / Secret (선택) |
+| `NAVER_DIRECTIONS` | `0` 이면 유료 길찾기(Directions 5)를 쓰지 않고 직선거리로 요금 추정 (지도·주소 검색은 그대로) |
 
 > 🚀 **가장 쉬운 배포: [RENDER.md](RENDER.md)** (저장소 연결 → 자동 배포·HTTPS·디스크). 서버를 직접 운영하려면 [DEPLOY.md](DEPLOY.md) — Docker + Caddy(자동 HTTPS) + 매일 백업 + (선택) coturn, 공개 전 실제 기기 확인 체크리스트 포함
 >

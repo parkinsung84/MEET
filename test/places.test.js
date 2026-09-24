@@ -6,6 +6,7 @@ import { identity, relaxedLimits } from './helpers.js';
 /** 테스트용 네이버 클라이언트 대역 */
 const fakeNaver = {
   mapsEnabled: true,
+  directionsEnabled: true,
   searchEnabled: true,
   mapKeyId: 'public-key-id',
   searchPlaces: async (q) => (q === 'fail' ? Promise.reject(new Error('down')) : [{ name: `${q} 결과`, address: '', category: '', lat: 35.1, lng: 129.04 }]),

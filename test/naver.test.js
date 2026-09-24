@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createNaverClient, simplifyPath } from '../src/naver.js';
+import { createNaverClient, naverClientFromEnv, simplifyPath } from '../src/naver.js';
 
 /** 요청을 기록하고, URL 경로별로 준비된 응답을 돌려주는 가짜 fetch */
 function fakeFetch(routes) {
@@ -17,6 +17,14 @@ function fakeFetch(routes) {
 }
 
 const KEYS = { ncpKeyId: 'kid', ncpKey: 'ksecret', searchClientId: 'sid', searchClientSecret: 'ssecret' };
+
+test('NAVER_DIRECTIONS=0 이면 지도·검색은 쓰고 유료 길찾기만 끈다', () => {
+  const env = { NAVER_MAP_KEY_ID: 'k', NAVER_MAP_KEY: 's', NAVER_DIRECTIONS: '0' };
+  const naver = naverClientFromEnv(env);
+  assert.equal(naver.mapsEnabled, true);
+  assert.equal(naver.directionsEnabled, false);
+  assert.equal(naverClientFromEnv({ NAVER_MAP_KEY_ID: 'k', NAVER_MAP_KEY: 's' }).directionsEnabled, true);
+});
 
 test('키가 없으면 기능이 비활성화된다', () => {
   const naver = createNaverClient();

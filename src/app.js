@@ -56,7 +56,7 @@ export function createApp({
     notifier,
     locationLog,
     // 네이버 길찾기가 설정돼 있으면 실제 도로 경로/택시요금을 사용하고, 실패하면 추정치로 대체
-    findRoute: naver.mapsEnabled
+    findRoute: naver.directionsEnabled
       ? (origin, destination) => naver.route(origin, destination).catch((err) => {
           console.error('[naver] route:', err.message);
           return null;

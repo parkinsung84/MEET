@@ -27,14 +27,17 @@ export function placePicker(label, { allowCurrent = false } = {}) {
   const search = debounce(async (q) => {
     const id = ++seq;
     try {
-      const { places } = await api('GET', `/places/search?${new URLSearchParams({ q })}`);
+      const { places, source } = await api('GET', `/places/search?${new URLSearchParams({ q })}`);
       if (id !== seq) return;
       suggestions = places;
+      // 네이버 검색 키가 없으면 주요 장소 몇 곳만 검색된다는 걸 알려준다
+      const presetNote = source === 'preset' && h('li', { class: 'muted preset-note' },
+        '⚠️ 지금은 주요 장소(서울역·강남역·공항 등)만 검색돼요. 모든 주소·장소를 찾으려면 운영자가 네이버 검색 키를 설정해야 해요.');
       list.replaceChildren(...(places.length
         ? places.map((p) => h('li', { role: 'option', onclick: () => select(p) },
             h('strong', {}, p.name),
             (p.address || p.category) && h('span', { class: 'muted' }, [p.category, p.address].filter(Boolean).join(' · '))))
-        : [h('li', { class: 'muted' }, '검색 결과가 없어요.')]));
+        : [h('li', { class: 'muted' }, '검색 결과가 없어요.')]), ...(presetNote ? [presetNote] : []));
       list.hidden = false;
     } catch (err) {
       if (id === seq) toast(err.message);
