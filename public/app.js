@@ -47,6 +47,8 @@ const SCREENS = [
 function route() {
   state.cleanup?.();
   state.cleanup = null;
+  // 열려 있던 시트(모달)는 화면을 옮기면 닫는다 (통화 화면은 유지)
+  document.querySelectorAll('.sheet-backdrop').forEach((el) => el.remove());
   const path = location.hash.slice(1) || '/';
   if (!state.user && !PUBLIC.has(path)) {
     location.hash = '#/login';

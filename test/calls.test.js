@@ -58,7 +58,8 @@ let hours = 0;
 async function rideWith(host, ...members) {
   const { body } = await api('POST', '/rides', {
     token: host.token,
-    body: { origin: SEOUL_STN, destination: GANGNAM, departAt: new Date(Date.now() + (hours += 3) * 3600_000).toISOString() },
+    // 이 파일의 테스트는 성별과 무관하므로 남녀가 함께 탈 수 있는 대형 택시 합승으로 만든다
+    body: { origin: SEOUL_STN, destination: GANGNAM, departAt: new Date(Date.now() + (hours += 3) * 3600_000).toISOString(), taxiType: 'large' },
   });
   for (const m of members) await api('POST', `/rides/${body.ride.id}/join`, { token: m.token });
   return body.ride;

@@ -10,7 +10,8 @@ export const state = {
 };
 
 export const STATUS_LABEL = { open: '모집 중', departed: '이동 중', completed: '완료', cancelled: '취소됨' };
-export const GENDER_LABEL = { any: '성별 무관', male: '남성만', female: '여성만' };
+export const GENDER_LABEL = { any: '성별 무관', male: '👨 남성끼리', female: '👩 여성끼리' };
+export const SEAT_LABEL = { front: '조수석', rear_right: '뒷좌석 오른쪽', rear_left: '뒷좌석 왼쪽', rear_middle: '뒷좌석 가운데' };
 
 export const won = (n) => `${Number(n).toLocaleString('ko-KR')}원`;
 export const formatTime = (iso) =>

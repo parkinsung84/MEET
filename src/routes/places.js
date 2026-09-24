@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { badRequest, HttpError } from '../errors.js';
 import { searchPresetPlaces } from '../places.js';
 
-export function placesRouter(naver, auth) {
+export function placesRouter(naver, auth, locationLog = null) {
   const router = Router();
   router.use(auth.required);
   const searchConfigured = naver.searchEnabled || naver.mapsEnabled;
@@ -31,6 +31,8 @@ export function placesRouter(naver, auth) {
       throw badRequest('좌표가 올바르지 않습니다.');
     }
     const fallback = { name: '선택한 위치', address: '', lat, lng };
+    // 기기 위치(현재 위치 버튼)를 주소로 바꾸는 것도 개인위치정보 이용이므로 기록 (좌표는 저장하지 않음)
+    locationLog?.record(req.userId, { action: 'reverse_geocode', purpose: '현재 위치 또는 지도에서 고른 위치를 주소로 변환' });
     if (!naver.mapsEnabled) return res.json({ place: fallback });
     try {
       res.json({ place: (await naver.reverseGeocode(lat, lng)) ?? fallback });

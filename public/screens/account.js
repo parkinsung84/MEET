@@ -124,6 +124,38 @@ function orgCard(user) {
     }, '인증')));
 }
 
+const LOCATION_ACTIONS = {
+  reverse_geocode: '📍 현재 위치 → 주소 변환',
+  search: '🔍 주변 합승 검색',
+  ride_create: '🚕 합승방 생성',
+  dropoff: '🛑 하차 지점 설정',
+  alert: '🔔 경로 알림 등록',
+  share_view: '🔗 안심 공유 조회',
+};
+
+/** 위치정보 이용·제공 사실 확인자료 열람 (위치정보법) */
+function locationLogCard() {
+  const list = h('div', { class: 'stack', hidden: true });
+  return h('div', { class: 'card stack' },
+    h('h2', {}, '📍 위치정보 이용 내역'),
+    h('p', { class: 'muted' }, '내 위치정보를 언제, 무슨 목적으로 이용·제공했는지 확인할 수 있어요 (1년 보관). 좌표는 기록하지 않아요.'),
+    h('button', {
+      class: 'secondary',
+      onclick: async () => {
+        list.hidden = !list.hidden;
+        if (list.hidden) return;
+        try {
+          const { logs } = await api('GET', '/me/location-logs');
+          list.replaceChildren(...(logs.length ? logs.map((l) => h('div', { class: 'log-row' },
+            h('div', {}, LOCATION_ACTIONS[l.action] ?? l.action),
+            h('div', { class: 'muted' }, `${formatTime(l.createdAt)} · ${l.purpose}${l.recipient ? ` · 제공: ${l.recipient}` : ''}`)))
+            : [h('div', { class: 'muted' }, '기록이 없어요.')]));
+        } catch (err) { toast(err.message); }
+      },
+    }, '내역 보기'),
+    list);
+}
+
 /** 계정 보안: 비밀번호 변경, 모든 기기 로그아웃, 회원 탈퇴 */
 function securityCard() {
   const current = h('input', { type: 'password', placeholder: '현재 비밀번호', autocomplete: 'current-password', 'aria-label': '현재 비밀번호' });
@@ -207,6 +239,7 @@ export function profileScreen() {
       pushCard(),
       alertsCard(),
       blockedCard(),
+      locationLogCard(),
       securityCard(),
       h('button', { class: 'secondary wide', onclick: logout }, '로그아웃'),
       h('p', { class: 'legal-links muted' },

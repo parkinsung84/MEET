@@ -4,6 +4,12 @@ import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.j
 import { estimateFare, haversineKm, projectOnRoute, splitByDropoffs, splitFare } from './geo.js';
 
 const GENDERS = ['any', 'male', 'female'];
+// 택시발전법 시행규칙(2022.6): 경형·소형·중형 택시 합승은 같은 성별끼리만, 대형(6~10인승)·승합은 성별 제한 없음
+export const TAXI_TYPES = ['standard', 'large'];
+// 탑승 전 좌석 안내 (배정 순서)
+export const SEATS = ['front', 'rear_right', 'rear_left', 'rear_middle'];
+export const SEAT_LABELS = { front: '조수석', rear_right: '뒷좌석 오른쪽', rear_left: '뒷좌석 왼쪽', rear_middle: '뒷좌석 가운데' };
+const EMERGENCY_GUIDE = "위급하면 앱의 🚨 긴급 신고로 112에 바로 신고할 수 있어요.";
 const MIN = 60 * 1000;
 const MAX_ADVANCE_MS = 7 * 24 * 60 * MIN;
 const DEFAULT_RADIUS_KM = 2;
@@ -93,14 +99,14 @@ export function matchRoute(ride, { origin, destination, radiusKm }) {
 /**
  * findRoute(origin, destination): 실제 도로 경로를 돌려주는 선택적 함수
  *   → { distanceKm, durationMin, taxiFare, path } 또는 null (추정치 사용)
- * users: 사용자/신뢰 서비스, notifier: 알림 허브
+ * users: 사용자/신뢰 서비스, notifier: 알림 허브, locationLog: 위치정보 이용·제공 사실 기록
  */
-export function createRideService(db, { findRoute = null, users, notifier, log = console }) {
+export function createRideService(db, { findRoute = null, users, notifier, locationLog = null, log = console }) {
   const stmt = {
     rideById: db.prepare('SELECT * FROM rides WHERE id = ?'),
     members: db.prepare(`
       SELECT u.id, u.nickname, u.gender, u.email_verified, u.org_domain, m.joined_at, m.dropoff_name,
-             m.dropoff_lat, m.dropoff_lng, m.dropoff_t, m.arrived_at, m.paid_at
+             m.dropoff_lat, m.dropoff_lng, m.dropoff_t, m.arrived_at, m.paid_at, m.seat
       FROM ride_members m JOIN users u ON u.id = m.user_id
       WHERE m.ride_id = ? ORDER BY m.joined_at, u.id`),
     memberIds: db.prepare('SELECT user_id AS id FROM ride_members WHERE ride_id = ?'),
@@ -108,10 +114,13 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     insertRide: db.prepare(`
       INSERT INTO rides (host_id, origin_name, origin_lat, origin_lng, dest_name, dest_lat, dest_lng,
                          depart_at, max_seats, gender_pref, memo, meeting_point, org_domain,
-                         distance_km, duration_min, taxi_fare, route_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    insertMember: db.prepare(`INSERT INTO ride_members (ride_id, user_id, dropoff_name, dropoff_lat, dropoff_lng, dropoff_t)
-      VALUES (?, ?, ?, ?, ?, ?)`),
+                         distance_km, duration_min, taxi_fare, route_path, taxi_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insertMember: db.prepare(`INSERT INTO ride_members (ride_id, user_id, dropoff_name, dropoff_lat, dropoff_lng, dropoff_t, seat)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    takenSeats: db.prepare('SELECT user_id, seat FROM ride_members WHERE ride_id = ? AND seat IS NOT NULL'),
+    setSeat: db.prepare('UPDATE ride_members SET seat = ? WHERE ride_id = ? AND user_id = ?'),
+    insertEmergency: db.prepare('INSERT INTO ride_emergencies (ride_id, user_id) VALUES (?, ?)'),
     deleteMember: db.prepare('DELETE FROM ride_members WHERE ride_id = ? AND user_id = ?'),
     setHost: db.prepare('UPDATE rides SET host_id = ? WHERE id = ?'),
     setStatus: db.prepare('UPDATE rides SET status = ? WHERE id = ?'),
@@ -178,8 +187,29 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
   }
 
   /** 성별·소속·차단 조건으로 이 사용자가 참여할 수 있는 방인지 */
+  /**
+   * 이 방에 탈 수 있는 성별 (null = 제한 없음).
+   * 일반(중형 이하) 택시는 같은 성별끼리만 탈 수 있으므로 방장 성별로 고정된다.
+   */
+  function requiredGender(ride) {
+    if (ride.gender_pref !== 'any') return ride.gender_pref;
+    if (ride.taxi_type !== 'large') return stmt.userById.get(ride.host_id)?.gender ?? null;
+    return null;
+  }
+
+  /** 비어 있는 첫 좌석 */
+  function freeSeat(rideId) {
+    const taken = new Set(stmt.takenSeats.all(rideId).map((r) => r.seat));
+    return SEATS.find((seat) => !taken.has(seat)) ?? null;
+  }
+
+  const recordLocation = (userId, entry, options) => locationLog?.record(userId, entry, options);
+
   function eligibility(ride, user, blocked = users.blockedSet(user.id)) {
-    if (ride.gender_pref !== 'any' && ride.gender_pref !== user.gender) return '성별 조건이 맞지 않아 참여할 수 없습니다.';
+    const gender = requiredGender(ride);
+    if (gender && gender !== user.gender) {
+      return ride.taxi_type === 'large' ? '성별 조건이 맞지 않아 참여할 수 없습니다.' : '일반 택시 합승은 같은 성별끼리만 탈 수 있어요.';
+    }
     if (ride.org_domain && (!user.email_verified || user.org_domain !== ride.org_domain)) {
       return `@${ride.org_domain} 인증 사용자만 참여할 수 있는 합승입니다.`;
     }
@@ -240,7 +270,9 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       destination: { name: ride.dest_name, lat: ride.dest_lat, lng: ride.dest_lng },
       departAt: ride.depart_at,
       maxSeats: ride.max_seats,
-      genderPref: ride.gender_pref,
+      taxiType: ride.taxi_type,
+      // 실제로 적용되는 성별 조건 (일반 택시는 방장 성별로 고정)
+      genderPref: requiredGender(ride) ?? 'any',
       orgOnly: ride.org_domain,
       memo: ride.memo,
       status: ride.status,
@@ -262,6 +294,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
         org: profile.org,
         stats: profile.stats,
         arrived: Boolean(m.arrived_at),
+        seat: m.seat,
         dropoff: memberView && m.dropoff_name ? { name: m.dropoff_name, lat: m.dropoff_lat, lng: m.dropoff_lng } : null,
       };
     });
@@ -283,7 +316,9 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       if (departAt.getTime() > now + MAX_ADVANCE_MS) throw badRequest('출발 시간은 7일 이내로 설정해 주세요.');
       const maxSeats = Number(input.maxSeats ?? 4);
       if (!Number.isInteger(maxSeats) || maxSeats < 2 || maxSeats > 4) throw badRequest('정원은 2~4명입니다.');
-      const genderPref = input.genderPref ?? 'any';
+      const taxiType = input.taxiType ?? 'standard';
+      if (!TAXI_TYPES.includes(taxiType)) throw badRequest('택시 종류가 올바르지 않습니다.');
+      let genderPref = input.genderPref ?? 'any';
       if (!GENDERS.includes(genderPref)) throw badRequest('성별 조건이 올바르지 않습니다.');
       const memo = typeof input.memo === 'string' ? input.memo.trim().slice(0, 200) : '';
       const meetingPoint = typeof input.meetingPoint === 'string' ? input.meetingPoint.trim().slice(0, 100) : '';
@@ -292,6 +327,8 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       if (genderPref !== 'any' && host.gender !== genderPref) {
         throw badRequest('본인이 참여할 수 없는 성별 조건입니다.');
       }
+      // 일반 택시는 같은 성별끼리만 (법령) — 방장 성별로 고정
+      if (taxiType === 'standard') genderPref = host.gender;
       if (input.orgOnly && !host.org_domain) throw badRequest('학교/회사 이메일 인증을 한 사용자만 소속 전용 합승을 만들 수 있어요.');
       assertNoOverlap(hostId, departAt.toISOString());
 
@@ -302,11 +339,12 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
           hostId, origin.name, origin.lat, origin.lng, destination.name, destination.lat, destination.lng,
           departAt.toISOString(), maxSeats, genderPref, memo, meetingPoint, input.orgOnly ? host.org_domain : null,
           route?.distanceKm ?? null, route?.durationMin ?? null, route?.taxiFare ?? null,
-          route?.path?.length ? JSON.stringify(route.path) : null,
+          route?.path?.length ? JSON.stringify(route.path) : null, taxiType,
         );
-        stmt.insertMember.run(lastInsertRowid, hostId, null, null, null, 1);
+        stmt.insertMember.run(lastInsertRowid, hostId, null, null, null, 1, SEATS[0]);
         return Number(lastInsertRowid);
       });
+      recordLocation(hostId, { action: 'ride_create', purpose: '합승방 생성 — 출발지·도착지 저장, 검색 이용자에게 공개' });
       return serialize(loadRide(rideId), { detail: true, memberView: true });
     },
 
@@ -343,6 +381,9 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       // 시간 차이 기준점: 범위를 주면 그 가운데, 아니면 지금
       const center = qFrom !== null && qTo !== null ? (qFrom + qTo) / 2 : (qFrom ?? now);
 
+      if (origin || destination) {
+        recordLocation(viewerId, { action: 'search', purpose: '출발지·도착지 주변 합승 검색' }, { throttleMs: 60 * 1000 });
+      }
       const results = [];
       for (const ride of stmt.openRides.all(new Date(from).toISOString(), new Date(to).toISOString())) {
         const members = stmt.members.all(ride.id);
@@ -394,9 +435,12 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
         if (reason) throw forbidden(reason);
         assertNoOverlap(userId, fresh.depart_at, fresh.id);
         stmt.insertMember.run(fresh.id, userId, onTheWay ? place.name : null, onTheWay ? place.lat : null,
-          onTheWay ? place.lng : null, t);
+          onTheWay ? place.lng : null, t, freeSeat(fresh.id));
         return members.length + 1;
       });
+      if (onTheWay) {
+        recordLocation(userId, { action: 'dropoff', purpose: '가는 길 하차 지점 설정 — 요금 분담 계산', recipient: '같은 합승 멤버' });
+      }
 
       const others = memberIdsOf(ride.id).filter((id) => id !== userId);
       const nickname = nicknameOf(userId);
@@ -587,6 +631,36 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       return service.get(ride.id, userId);
     },
 
+    /** 좌석 바꾸기 (탑승 전) */
+    setSeat(rideId, userId, seat) {
+      const ride = loadRide(rideId);
+      assertMember(ride.id, userId);
+      if (ride.status !== 'open') throw conflict('탑승 전에만 좌석을 바꿀 수 있어요.');
+      if (!SEATS.includes(seat)) throw badRequest('좌석이 올바르지 않습니다.');
+      transaction(db, () => {
+        const owner = stmt.takenSeats.all(ride.id).find((r) => r.seat === seat);
+        if (owner && owner.user_id !== userId) throw conflict(`${SEAT_LABELS[seat]}은(는) ${nicknameOf(owner.user_id)}님 자리예요.`);
+        stmt.setSeat.run(seat, ride.id, userId);
+      });
+      return service.get(ride.id, userId);
+    },
+
+    /**
+     * 긴급 신고 버튼: 기록을 남기고 동승자에게 알린다. 112 신고 자체는 이용자 기기에서 직접 한다.
+     */
+    emergency(rideId, userId) {
+      const ride = loadRide(rideId);
+      assertMember(ride.id, userId);
+      if (!['open', 'departed'].includes(ride.status)) throw conflict('진행 중인 합승에서만 사용할 수 있어요.');
+      stmt.insertEmergency.run(ride.id, userId);
+      fire(memberIdsOf(ride.id).filter((id) => id !== userId), {
+        type: 'emergency', rideId: ride.id, title: '🚨 긴급 신고',
+        body: `${nicknameOf(userId)}님이 긴급 신고 버튼을 눌렀어요. 상황을 확인하고 필요하면 112에 신고해 주세요.`,
+      });
+      log.warn?.(`[emergency] ride=${ride.id} user=${userId}`);
+      return { ok: true, taxi: taxiOf(ride), route: routeLabel(ride) };
+    },
+
     /** 안심 공유 링크 발급 (가족·지인이 로그인 없이 볼 수 있음) */
     createShare(rideId, userId) {
       const ride = loadRide(rideId);
@@ -612,6 +686,9 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       const endedAt = ride.status === 'completed' ? ride.completed_at : ride.status === 'cancelled' ? ride.depart_at : null;
       if (endedAt && Date.now() - new Date(endedAt).getTime() > SHARE_AFTER_END_MS) throw new HttpError(410, '합승이 끝나 공유가 종료되었어요.');
       const fare = fareOf(ride);
+      // 공유받은 사람에게 합승 경로를 제공한 사실 기록 (같은 링크 반복 조회는 10분에 한 번)
+      recordLocation(share.user_id, { action: 'share_view', purpose: '안심 공유 — 합승 경로·차량번호 제공', recipient: '안심 공유 링크 수신자' },
+        { throttleMs: 10 * 60 * 1000 });
       return {
         sharedBy: nicknameOf(share.user_id),
         origin: ride.origin_name,
@@ -681,7 +758,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
         if (members.length < 2) continue;
         fire(members.map((m) => m.id), {
           type: 'reminder', rideId: ride.id, title: '⏰ 곧 출발해요',
-          body: `${kst(ride.depart_at)} 출발 · 만남 장소: ${ride.meeting_point || ride.origin_name}. 도착하면 '도착했어요'를 눌러주세요.`,
+          body: `${kst(ride.depart_at)} 출발 · 만남 장소: ${ride.meeting_point || ride.origin_name}. 도착하면 '도착했어요'를 눌러주세요. ${EMERGENCY_GUIDE}`,
         });
       }
       for (const ride of stmt.expired.all(new Date(now - EXPIRE_AFTER_MS).toISOString())) {

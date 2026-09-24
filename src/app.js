@@ -9,6 +9,7 @@ import { createCallService } from './calls.js';
 import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
 import { createInquiryService } from './inquiries.js';
+import { createLocationLog } from './location-log.js';
 import { createMailer } from './mailer.js';
 import { createNaverClient } from './naver.js';
 import { createNotifier } from './notifier.js';
@@ -48,9 +49,11 @@ export function createApp({
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
   const users = createUserService(db, { secret, mailer, sms, exposeDevCode });
+  const locationLog = createLocationLog(db);
   const rides = createRideService(db, {
     users,
     notifier,
+    locationLog,
     // 네이버 길찾기가 설정돼 있으면 실제 도로 경로/택시요금을 사용하고, 실패하면 추정치로 대체
     findRoute: naver.mapsEnabled
       ? (origin, destination) => naver.route(origin, destination).catch((err) => {
@@ -59,7 +62,7 @@ export function createApp({
         })
       : null,
   });
-  const alerts = createAlertService(db, { rides, notifier });
+  const alerts = createAlertService(db, { rides, notifier, locationLog });
   const inquiries = createInquiryService(db, { rides, users, notifier });
 
   const app = express();
@@ -101,6 +104,8 @@ export function createApp({
     vapidPublicKey: pusher?.publicKey ?? null,
   }));
   app.use('/api/auth', authRouter(db, auth, users, account, authLimits));
+  // 위치정보 이용·제공 사실 확인자료 열람 (본인)
+  app.get('/api/me/location-logs', auth.required, (req, res) => res.json({ logs: locationLog.list(req.userId) }));
   // 안심 공유: 로그인 없이 토큰으로 조회 (추측할 수 없는 18바이트 랜덤 토큰)
   app.get('/api/share/:token', (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -109,7 +114,7 @@ export function createApp({
   app.use('/api/users', usersRouter(users, auth));
   app.use('/api/notifications', notificationsRouter(notifier, auth));
   app.use('/api/alerts', alertsRouter(alerts, users, auth));
-  app.use('/api/places', placesRouter(naver, auth));
+  app.use('/api/places', placesRouter(naver, auth, locationLog));
   app.use('/api/rides', ridesRouter({
     rides, users, alerts, inquiries, auth,
     changed: realtime.rideChanged,
@@ -130,6 +135,7 @@ export function createApp({
     for (const rideId of rides.tick(now)) realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
     alerts.purgeExpired(now);
     account.purgeExpired(now);
+    locationLog.purgeExpired(now);
   }
 
   return {

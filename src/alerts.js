@@ -17,7 +17,7 @@ function place(p, label) {
  * 경로 알림: "이 경로로 합승방이 생기면 알려주세요".
  * 새 합승방이 만들어지면 시간·경로·참여 조건이 맞는 알림 신청자에게 알린다.
  */
-export function createAlertService(db, { rides, notifier, log = console }) {
+export function createAlertService(db, { rides, notifier, locationLog = null, log = console }) {
   const stmt = {
     insert: db.prepare(`INSERT INTO ride_alerts (user_id, origin_name, origin_lat, origin_lng, dest_name, dest_lat, dest_lng,
       radius_km, depart_from, depart_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -49,6 +49,7 @@ export function createAlertService(db, { rides, notifier, log = console }) {
       if (stmt.active.all(userId, new Date(now).toISOString()).length >= MAX_ACTIVE_ALERTS) {
         throw conflict(`경로 알림은 최대 ${MAX_ACTIVE_ALERTS}개까지 등록할 수 있어요.`);
       }
+      locationLog?.record(userId, { action: 'alert', purpose: '경로 알림 등록 — 출발지·도착지 근처 새 합승방 알림' });
       const { lastInsertRowid } = stmt.insert.run(userId, origin.name, origin.lat, origin.lng,
         destination.name, destination.lat, destination.lng, radiusKm,
         new Date(from).toISOString(), new Date(to).toISOString());

@@ -141,7 +141,8 @@ export function rideCard(ride) {
       ride.match?.type === 'onTheWay' && h('span', { class: 'chip ok' }, '가는 길에 하차'),
       ride.joined && h('span', { class: 'chip ok' }, '참여 중'),
       ride.orgOnly && h('span', { class: 'chip' }, `🎓 ${ride.orgOnly}만`),
-      ride.genderPref !== 'any' && h('span', { class: 'chip' }, GENDER_LABEL[ride.genderPref]),
+      ride.taxiType === 'large' && h('span', { class: 'chip' }, '🚐 대형 택시'),
+      h('span', { class: 'chip' }, GENDER_LABEL[ride.genderPref]),
     ),
     h('div', { class: 'host-line muted' }, `방장 ${ride.host.nickname}`, trustChips(ride.host)),
   );

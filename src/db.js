@@ -178,6 +178,27 @@ CREATE TABLE IF NOT EXISTS ride_shares (
   revoked_at TEXT
 );
 
+-- 긴급 신고 버튼 기록 (분쟁·수사 협조용)
+CREATE TABLE IF NOT EXISTS ride_emergencies (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ride_id    INTEGER NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 위치정보 이용·제공 사실 확인자료 (위치정보법 제16조 — 자동 기록, 6개월 이상 보관)
+-- 좌표 자체는 남기지 않고 "언제, 누구의 위치를, 무슨 목적으로, 누구에게" 만 기록한다
+CREATE TABLE IF NOT EXISTS location_usage_logs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  action     TEXT NOT NULL,
+  purpose    TEXT NOT NULL,
+  recipient  TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_location_logs_user ON location_usage_logs(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_location_logs_time ON location_usage_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_withdrawn_phone ON withdrawn_accounts(phone_hash);
 CREATE INDEX IF NOT EXISTS idx_sms_sends ON sms_sends(phone, sent_at);
 CREATE INDEX IF NOT EXISTS idx_sms_sends_user ON sms_sends(user_id, sent_at);
@@ -218,6 +239,7 @@ const COLUMNS = {
     taxi_note: 'TEXT',               // 차종·색상 등 메모
     taxi_recorded_by: 'INTEGER',
     taxi_recorded_at: 'TEXT',
+    taxi_type: "TEXT NOT NULL DEFAULT 'standard'", // standard: 중형 이하(동성만) / large: 대형·승합(성별 무관 가능)
   },
   ride_members: {
     dropoff_name: 'TEXT',            // 가는 길에 먼저 내리는 경우 하차 지점 (NULL = 최종 도착지)
@@ -226,6 +248,7 @@ const COLUMNS = {
     dropoff_t: 'REAL NOT NULL DEFAULT 1', // 경로상 하차 위치 비율 (0~1)
     arrived_at: 'TEXT',              // 만남 장소 도착 체크인
     paid_at: 'TEXT',                 // 정산 송금 완료
+    seat: 'TEXT',                    // 좌석 (front / rear_right / rear_left / rear_middle)
   },
 };
 

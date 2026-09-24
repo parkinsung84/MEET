@@ -1,6 +1,6 @@
 import { startCall } from '../call.js';
 import { genderChip, placePicker, routeSummary, trustChips } from '../components.js';
-import { api, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, state, STATUS_LABEL, won } from '../core.js';
+import { api, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, SEAT_LABEL, state, STATUS_LABEL, won } from '../core.js';
 import { mapsAvailable, renderRouteMap } from '../maps.js';
 import { ask, copyText, h, sheet, toast } from '../ui.js';
 
@@ -180,7 +180,13 @@ export function rideScreen(rideId) {
     const body = h('div', { class: 'stack' },
       choice('dest', `${ride.destination.name}까지 같이 가요`, !suggested),
       choice('dropoff', '가는 길에 먼저 내려요', suggested),
-      pickerBox);
+      pickerBox,
+      h('div', { class: 'boarding-note' },
+        h('strong', {}, '탑승 전 안내'),
+        h('ul', {},
+          h('li', {}, ride.taxiType === 'large' ? '🚐 대형 택시(6인승 이상·승합)로 타는 합승이에요.' : `🚕 일반 택시 합승 — ${GENDER_LABEL[ride.genderPref]}만 탈 수 있어요.`),
+          h('li', {}, '💺 좌석은 참여 순서대로 배정되고, 탑승 전까지 바꿀 수 있어요.'),
+          h('li', {}, '🚨 위급하면 합승 화면의 긴급 버튼 → 112 전화·문자로 바로 신고할 수 있어요.'))));
     sheet('합승 참여', body, [{
       label: '참여하기',
       onClick: async (close) => {
@@ -269,6 +275,63 @@ export function rideScreen(rideId) {
   }
 
   // ---------- 화면 구성 ----------
+
+  // ---------- 탑승 전 안내 (좌석 · 긴급신고) ----------
+
+  const SEAT_LAYOUT = [['driver', 'front'], ['rear_left', 'rear_middle', 'rear_right']];
+  function boardingCard() {
+    if (!isMember() || ride.status !== 'open') return null;
+    const bySeat = new Map(ride.members.filter((m) => m.seat).map((m) => [m.seat, m]));
+    const mySeat = myMember()?.seat;
+    const cell = (seat) => {
+      if (seat === 'driver') return h('div', { class: 'seat driver' }, '🧑‍✈️ 운전석');
+      const owner = bySeat.get(seat);
+      const mine = owner?.id === me();
+      return h('button', {
+        type: 'button',
+        class: `seat${owner ? ' taken' : ''}${mine ? ' mine' : ''}`,
+        disabled: Boolean(owner),
+        'aria-label': `${SEAT_LABEL[seat]}${owner ? ` — ${owner.nickname}` : ' — 비어 있음'}`,
+        onclick: () => action(() => api('PUT', `/rides/${ride.id}/seat`, { seat }), `${SEAT_LABEL[seat]}으로 옮겼어요.`),
+      }, h('span', { class: 'seat-name' }, SEAT_LABEL[seat].replace('뒷좌석 ', '뒤 ')), h('br'), owner ? owner.nickname : '비어 있음');
+    };
+    return h('div', { class: 'card stack' },
+      h('h2', {}, '💺 탑승 전 안내'),
+      h('div', { class: 'seat-map' }, SEAT_LAYOUT.map((row) => h('div', { class: 'seat-row' }, row.map(cell)))),
+      h('p', { class: 'muted' }, mySeat ? `내 자리: ${SEAT_LABEL[mySeat]} · 빈 자리를 누르면 옮길 수 있어요.` : '빈 자리를 눌러 앉을 자리를 정하세요.'),
+      h('ul', { class: 'muted guide' },
+        h('li', {}, ride.taxiType === 'large'
+          ? '🚐 대형 택시(6인승 이상·승합)를 불러 주세요.'
+          : `🚕 일반 택시 합승 — ${GENDER_LABEL[ride.genderPref]} 탑승해요.`),
+        h('li', {}, '🚕 탑승하면 차량번호를 기록하고, 필요하면 가족에게 안심 공유하세요.'),
+        h('li', {}, h('strong', {}, '🚨 위급하면 화면 오른쪽 위 긴급 버튼'), ' → 112 전화 또는 문자 신고 (차량번호·경로 자동 입력)')));
+  }
+
+  /** 긴급 신고 시트: 112 전화 / 112 문자(차량번호·경로·현재 위치 자동 작성) + 동승자 알림 */
+  async function openEmergency() {
+    let report = { taxi: ride.taxi, route: `${ride.origin.name} → ${ride.destination.name}` };
+    // 기록 + 동승자 알림 (실패해도 신고 버튼은 바로 쓸 수 있게 먼저 시트를 띄운다)
+    api('POST', `/rides/${ride.id}/emergency`).then((r) => { report = r; updateSms(); }).catch(() => {});
+    let where = '';
+    const sms = h('a', { class: 'btn danger-btn sos-action', href: 'sms:112' }, '💬 112 문자 신고');
+    function updateSms() {
+      const text = `[긴급] 택시 합승 중 도움이 필요합니다. 차량번호: ${report.taxi?.plate ?? '미기록'}${report.taxi?.note ? `(${report.taxi.note})` : ''}, 경로: ${report.route}${where}`;
+      // iOS 는 &body=, 안드로이드는 ?body= 를 쓴다
+      const sep = /iPhone|iPad|iPod/.test(navigator.userAgent) ? '&' : '?';
+      sms.href = `sms:112${sep}body=${encodeURIComponent(text)}`;
+    }
+    updateSms();
+    // 현재 위치는 문자에만 넣고 서버로 보내지 않는다
+    navigator.geolocation?.getCurrentPosition((pos) => {
+      where = `, 현재 위치: https://map.naver.com/p?c=${pos.coords.longitude.toFixed(6)},${pos.coords.latitude.toFixed(6)},17,0,0,0,dh`;
+      updateSms();
+    }, () => {}, { enableHighAccuracy: true, timeout: 8000 });
+    sheet('🚨 긴급 신고', h('div', { class: 'stack' },
+      h('a', { class: 'btn danger-btn sos-action', href: 'tel:112' }, '📞 112 전화'),
+      sms,
+      h('p', { class: 'muted' }, '문자에는 차량번호와 경로가 자동으로 들어가요(위치 권한이 있으면 현재 위치도). 동승자에게도 긴급 알림을 보냈어요.'),
+      h('a', { class: 'btn secondary', href: 'tel:119' }, '🚑 119 (구급·화재)')));
+  }
 
   /** 지금 해야 할 일을 안내하는 카드 */
   function nextStepCard() {
@@ -399,6 +462,7 @@ export function rideScreen(rideId) {
             h('button', { class: 'secondary small', 'aria-label': `${m.nickname} 메뉴`, onclick: () => openMemberMenu(m) }, '⋯'))),
         h('div', { class: 'chips' },
           trustChips(m),
+          m.seat && ride.status === 'open' && h('span', { class: 'chip' }, `💺 ${SEAT_LABEL[m.seat]}`),
           m.dropoff && h('span', { class: 'chip' }, `🛑 ${m.dropoff.name}에서 하차`),
           ride.fare.shares && ride.status === 'open' && h('span', { class: 'chip' }, `예상 ${won(ride.fare.shares[m.id])}`))))));
   }
@@ -478,11 +542,13 @@ export function rideScreen(rideId) {
         h('div', { class: 'muted' }, `${formatTime(ride.departAt)} 출발 · ${STATUS_LABEL[ride.status]}`),
         h('div', { class: 'chips' },
           h('span', { class: 'chip' }, `${ride.memberCount}/${ride.maxSeats}명`),
+          ride.taxiType === 'large' ? h('span', { class: 'chip' }, '🚐 대형 택시') : h('span', { class: 'chip' }, '🚕 일반 택시'),
           h('span', { class: 'chip' }, GENDER_LABEL[ride.genderPref]),
           ride.orgOnly && h('span', { class: 'chip' }, `🎓 ${ride.orgOnly}만`)),
         ride.memo && h('p', {}, ride.memo),
         !isMember() && h('p', { class: 'muted' }, '참여하면 정확한 만남 장소와 채팅이 열려요.')),
       nextStepCard(),
+      boardingCard(),
       guestInquiryCard(),
       threadsCard(),
       taxiPanel(),
@@ -491,6 +557,9 @@ export function rideScreen(rideId) {
       !ride.settlement && fareCard(),
       membersCard(),
       isMember() && chatPanel(),
+      // 진행 중인 합승의 멤버에게 항상 보이는 긴급 버튼
+      isMember() && ['open', 'departed'].includes(ride.status)
+        && h('button', { class: 'sos-fab', 'aria-label': '긴급 신고', onclick: openEmergency }, '🚨 긴급'),
     ));
     if (focused?.isConnected) focused.focus();
     await subscribeChat();

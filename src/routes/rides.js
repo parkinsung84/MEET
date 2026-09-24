@@ -55,6 +55,9 @@ export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, in
     respond(res, rides.markPaid(req.params.id, req.userId, req.body?.userId ?? req.userId));
   });
 
+  router.put('/:id/seat', (req, res) => respond(res, rides.setSeat(req.params.id, req.userId, req.body?.seat)));
+  router.post('/:id/emergency', (req, res) => res.json(rides.emergency(req.params.id, req.userId)));
+
   router.put('/:id/taxi', (req, res) => respond(res, rides.recordTaxi(req.params.id, req.userId, req.body ?? {})));
 
   router.post('/:id/share', (req, res) => {
