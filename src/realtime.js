@@ -1,4 +1,3 @@
-import { verifyToken } from './auth.js';
 import { HttpError } from './errors.js';
 import { inquiryRoom } from './inquiries.js';
 
@@ -12,9 +11,9 @@ const room = (rideId) => `ride:${rideId}`;
  *                     inquiry:message(message) — 문의자 본인과 방을 보고 있는 멤버에게
  * 연결되면 개인 room(user:<id>)에 들어가 알림을 받는다.
  */
-export function attachRealtime(io, rides, secret, { calls = null } = {}) {
+export function attachRealtime(io, rides, auth, { calls = null } = {}) {
   io.use((socket, next) => {
-    const userId = verifyToken(socket.handshake.auth?.token ?? '', secret);
+    const userId = auth.verify(socket.handshake.auth?.token ?? '');
     if (!userId) return next(new Error('unauthorized'));
     socket.data.userId = userId;
     next();

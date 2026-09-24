@@ -316,6 +316,56 @@ export function rideScreen(rideId) {
     return null;
   }
 
+  /** 탑승한 택시 차량번호 기록 + 가족·지인에게 안심 공유 */
+  let taxiCard = null;
+  function taxiPanel() {
+    if (!isMember() || ride.status === 'cancelled') return null;
+    const editable = ride.status === 'open' || ride.status === 'departed';
+    const t = ride.taxi;
+    // 입력 중인 내용이 다시 그리기로 지워지지 않도록, 기록이 바뀔 때만 새로 만든다
+    const key = `${ride.status}|${t?.plate}|${t?.note}`;
+    if (taxiCard?.key === key) return taxiCard.el;
+    const plate = h('input', { placeholder: '예: 서울12가3456', maxlength: 12, 'aria-label': '차량번호', value: t?.plate ?? '' });
+    const note = h('input', { placeholder: '차종·색상 (선택) 예: 흰색 쏘나타', maxlength: 50, 'aria-label': '차량 메모', value: t?.note ?? '' });
+    const form = h('form', { class: 'stack', hidden: Boolean(t) }, plate, note, h('button', {}, '차량번호 기록'));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      action(() => api('PUT', `/rides/${ride.id}/taxi`, { plate: plate.value, note: note.value }), '차량번호를 기록하고 동승자에게 알렸어요.');
+    });
+    const share = async () => {
+      try {
+        const { url } = await api('POST', `/rides/${ride.id}/share`);
+        const link = new URL(url, location.origin).href;
+        const text = `MEET 합승 안심 공유: ${ride.origin.name} → ${ride.destination.name}${t ? ` / 택시 ${t.plate}` : ''}`;
+        if (navigator.share) await navigator.share({ title: 'MEET 안심 공유', text, url: link }).catch(() => {});
+        else await copyText(link);
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+    const el = h('div', { class: 'card stack taxi-card' },
+      h('h2', {}, '🚕 탑승 택시'),
+      t
+        ? h('div', { class: 'plate-row' },
+          h('span', { class: 'plate' }, t.plate),
+          t.note && h('span', { class: 'muted' }, t.note),
+          editable && h('button', { class: 'secondary small', onclick: () => { form.hidden = !form.hidden; } }, '수정'))
+        : h('p', { class: 'muted' }, editable ? '택시에 타면 차량번호를 기록해 두세요. 문제가 생겼을 때 추적할 수 있고 동승자에게도 알려져요.' : '기록된 차량번호가 없어요.'),
+      t && h('div', { class: 'muted' }, `${t.recordedBy}님이 ${formatTime(t.recordedAt)}에 기록`),
+      editable && form,
+      editable && h('button', { class: 'secondary', onclick: share }, '🔗 가족·지인에게 안심 공유'),
+      editable && h('p', { class: 'muted' }, '링크를 받은 사람은 로그인 없이 경로·출발 시간·차량번호·탑승자 닉네임과 성별을 볼 수 있어요. 도착 12시간 후 자동 만료돼요.'),
+      editable && h('button', {
+        class: 'link',
+        onclick: async () => {
+          await api('DELETE', `/rides/${ride.id}/share`).catch(() => {});
+          toast('내가 만든 공유 링크를 모두 해제했어요.');
+        },
+      }, '공유 해제'));
+    taxiCard = { key, el };
+    return el;
+  }
+
   function fareCard() {
     const myShare = ride.fare.shares?.[me()];
     return h('div', { class: 'card' },
@@ -435,6 +485,7 @@ export function rideScreen(rideId) {
       nextStepCard(),
       guestInquiryCard(),
       threadsCard(),
+      taxiPanel(),
       settlementCard(),
       ratingCard(),
       !ride.settlement && fareCard(),

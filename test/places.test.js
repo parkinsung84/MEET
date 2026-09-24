@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
-import { identity } from './helpers.js';
+import { identity, relaxedLimits } from './helpers.js';
 
 /** 테스트용 네이버 클라이언트 대역 */
 const fakeNaver = {
@@ -17,7 +17,7 @@ const fakeNaver = {
 
 const servers = [];
 async function start(options) {
-  const { server } = createApp({ secret: 's', push: null, ...options });
+  const { server } = createApp({ secret: 's', authLimits: relaxedLimits(), push: null, ...options });
   await new Promise((resolve) => server.listen(0, resolve));
   servers.push(server);
   const base = `http://localhost:${server.address().port}/api`;

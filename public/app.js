@@ -3,7 +3,7 @@ import { api, connectSocket, state } from './core.js';
 import { loadNaverMaps } from './maps.js';
 import { registerServiceWorker, syncPush } from './push.js';
 import { myRidesScreen, notificationsScreen, profileScreen } from './screens/account.js';
-import { authScreen, verifyScreen } from './screens/auth.js';
+import { authScreen, consentScreen, forgotScreen, verifyScreen } from './screens/auth.js';
 import { homeScreen } from './screens/home.js';
 import { newRideScreen } from './screens/new-ride.js';
 import { rideScreen } from './screens/ride.js';
@@ -30,10 +30,12 @@ async function refreshUnread() {
 }
 
 // 인증이 필요 없는 화면
-const PUBLIC = new Set(['/login']);
+const PUBLIC = new Set(['/login', '/forgot']);
 // 이메일 인증 전에도 볼 수 있는 화면 (둘러보기는 가능, 만들기/참여는 서버에서 막음)
 const SCREENS = [
   [/^\/login$/, authScreen],
+  [/^\/forgot$/, forgotScreen],
+  [/^\/consent$/, consentScreen],
   [/^\/verify$/, verifyScreen],
   [/^\/new$/, newRideScreen],
   [/^\/mine$/, myRidesScreen],
@@ -50,8 +52,13 @@ function route() {
     location.hash = '#/login';
     return;
   }
-  if (state.user && path === '/login') {
+  if (state.user && PUBLIC.has(path)) {
     location.hash = '#/';
+    return;
+  }
+  // 약관이 바뀌었으면 다시 동의부터
+  if (state.user?.consentsRequired?.length && path !== '/consent') {
+    location.hash = '#/consent';
     return;
   }
   let screen = null;

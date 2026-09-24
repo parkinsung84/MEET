@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { io as connect } from 'socket.io-client';
 import { createApp } from '../src/app.js';
-import { identity } from './helpers.js';
+import { identity, relaxedLimits } from './helpers.js';
 
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
 const GANGNAM = { name: '강남역', lat: 37.4979, lng: 127.0276 };
@@ -46,7 +46,7 @@ const rideInput = (overrides = {}) => ({
 });
 
 before(async () => {
-  ({ server } = createApp({ secret: 'test-secret', push: null }));
+  ({ server } = createApp({ secret: 'test-secret', authLimits: relaxedLimits(), push: null }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://localhost:${server.address().port}`;
 });

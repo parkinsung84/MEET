@@ -30,6 +30,9 @@ const { server, startScheduler } = createApp({
   sms,
   // 운영 환경에서는 절대 인증번호를 응답에 넣지 않는다
   exposeDevCode: !production,
+  production,
+  // Caddy 등 프록시 뒤에서 실행하면 TRUST_PROXY=1
+  trustProxy: process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY : false,
 });
 startScheduler();
 server.listen(port, () => {

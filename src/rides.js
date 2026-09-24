@@ -1,5 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import { transaction } from './db.js';
-import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
 import { estimateFare, haversineKm, projectOnRoute, splitByDropoffs, splitFare } from './geo.js';
 
 const GENDERS = ['any', 'male', 'female'];
@@ -23,6 +24,10 @@ const TRANSITIONS = {
   completed: [],
   cancelled: [],
 };
+
+const SHARE_AFTER_END_MS = 12 * 60 * MIN;  // 합승이 끝나고 12시간 뒤 공유 링크 만료
+// 택시 번호판: (지역) 2~3자리 숫자 + 한글 1자 + 4자리 숫자. 예) 서울12가3456, 12가3456, 123바4567
+const PLATE_RE = /^(?:[가-힣]{2})?\d{2,3}[가-힣]\d{4}$/;
 
 const won = (n) => `${n.toLocaleString('ko-KR')}원`;
 const kst = (iso) => new Date(iso).toLocaleString('ko-KR', {
@@ -111,6 +116,10 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     setHost: db.prepare('UPDATE rides SET host_id = ? WHERE id = ?'),
     setStatus: db.prepare('UPDATE rides SET status = ? WHERE id = ?'),
     setCompleted: db.prepare(`UPDATE rides SET status = 'completed', completed_at = ? WHERE id = ?`),
+    setTaxi: db.prepare('UPDATE rides SET taxi_plate = ?, taxi_note = ?, taxi_recorded_by = ?, taxi_recorded_at = ? WHERE id = ?'),
+    insertShare: db.prepare('INSERT INTO ride_shares (token, ride_id, user_id) VALUES (?, ?, ?)'),
+    shareByToken: db.prepare('SELECT * FROM ride_shares WHERE token = ?'),
+    revokeShares: db.prepare(`UPDATE ride_shares SET revoked_at = datetime('now') WHERE ride_id = ? AND user_id = ? AND revoked_at IS NULL`),
     setMeetingPoint: db.prepare('UPDATE rides SET meeting_point = ? WHERE id = ?'),
     setReminded: db.prepare('UPDATE rides SET reminded_at = ? WHERE id = ?'),
     setSettlement: db.prepare('UPDATE rides SET payer_id = ?, actual_fare = ?, payer_account = ? WHERE id = ?'),
@@ -186,6 +195,16 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     return { source: fromNaver ? 'naver' : 'estimate', distanceKm, durationMin: ride.duration_min ?? null, total: fare };
   }
 
+  function taxiOf(ride) {
+    if (!ride.taxi_plate) return null;
+    return {
+      plate: ride.taxi_plate,
+      note: ride.taxi_note,
+      recordedBy: nicknameOf(ride.taxi_recorded_by),
+      recordedAt: ride.taxi_recorded_at,
+    };
+  }
+
   function settlementOf(ride, members) {
     if (!ride.payer_id) return null;
     const shares = splitByDropoffs(ride.actual_fare, members.map((m) => ({ userId: m.id, t: m.dropoff_t })));
@@ -248,6 +267,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     });
     result.meetingPoint = memberView ? ride.meeting_point || ride.origin_name : null;
     result.settlement = memberView ? settlementOf(ride, members) : null;
+    result.taxi = memberView ? taxiOf(ride) : null;
     return result;
   }
 
@@ -546,6 +566,64 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
 
     memberIds(rideId) {
       return memberIdsOf(Number(rideId));
+    },
+
+    /**
+     * 탑승한 택시 차량번호 기록 (멤버 누구나, 탑승 직전~이동 중).
+     * 문제가 생겼을 때 추적할 수 있도록 도착 후에도 멤버에게 남는다.
+     */
+    recordTaxi(rideId, userId, { plate, note } = {}) {
+      const ride = loadRide(rideId);
+      assertMember(ride.id, userId);
+      if (!['open', 'departed'].includes(ride.status)) throw conflict('탑승 전후(모집 중·이동 중)에만 기록할 수 있어요.');
+      const normalized = typeof plate === 'string' ? plate.replace(/[\s-]/g, '') : '';
+      if (!PLATE_RE.test(normalized)) throw badRequest('차량번호를 정확히 입력해 주세요. (예: 서울12가3456, 12가3456)');
+      const memo = typeof note === 'string' ? note.trim().slice(0, 50) : '';
+      stmt.setTaxi.run(normalized, memo, userId, new Date().toISOString(), ride.id);
+      fire(memberIdsOf(ride.id).filter((id) => id !== userId), {
+        type: 'taxi', rideId: ride.id, title: '🚕 택시 차량번호 기록',
+        body: `${normalized}${memo ? ` (${memo})` : ''} · ${nicknameOf(userId)}님이 기록했어요.`,
+      });
+      return service.get(ride.id, userId);
+    },
+
+    /** 안심 공유 링크 발급 (가족·지인이 로그인 없이 볼 수 있음) */
+    createShare(rideId, userId) {
+      const ride = loadRide(rideId);
+      assertMember(ride.id, userId);
+      if (!['open', 'departed'].includes(ride.status)) throw conflict('진행 중인 합승만 공유할 수 있어요.');
+      const token = randomBytes(18).toString('base64url');
+      stmt.insertShare.run(token, ride.id, userId);
+      return token;
+    },
+
+    revokeShares(rideId, userId) {
+      stmt.revokeShares.run(Number(rideId), userId);
+    },
+
+    /**
+     * 공유 링크로 보는 정보: 경로, 출발 시간, 상태, 택시 차량번호, 탑승자 닉네임·성별.
+     * 만남 장소·하차 지점·정산 정보·연락처는 포함하지 않는다.
+     */
+    shared(token) {
+      const share = typeof token === 'string' ? stmt.shareByToken.get(token) : null;
+      if (!share || share.revoked_at) throw notFound('만료되었거나 없는 공유 링크예요.');
+      const ride = loadRide(share.ride_id);
+      const endedAt = ride.status === 'completed' ? ride.completed_at : ride.status === 'cancelled' ? ride.depart_at : null;
+      if (endedAt && Date.now() - new Date(endedAt).getTime() > SHARE_AFTER_END_MS) throw new HttpError(410, '합승이 끝나 공유가 종료되었어요.');
+      const fare = fareOf(ride);
+      return {
+        sharedBy: nicknameOf(share.user_id),
+        origin: ride.origin_name,
+        destination: ride.dest_name,
+        departAt: ride.depart_at,
+        status: ride.status,
+        completedAt: ride.completed_at,
+        durationMin: fare.durationMin,
+        distanceKm: fare.distanceKm,
+        taxi: taxiOf(ride),
+        riders: stmt.members.all(ride.id).map((m) => ({ nickname: m.nickname, gender: m.gender })),
+      };
     },
 
     isMember(rideId, userId) {

@@ -1,0 +1,68 @@
+# 서버 한 대 배포:  docker compose up -d --build
+# 음성 통화 중계(TURN)까지:  docker compose --profile turn up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_PATH: /data/meet.db
+      TRUST_PROXY: "1"
+    volumes:
+      - meet-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?.env 에 DOMAIN 을 설정하세요}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # 매일 DB 백업 → ./backups (최근 14개 보관)
+  backup:
+    build: .
+    restart: unless-stopped
+    user: "0"
+    command: ["node", "--no-warnings=ExperimentalWarning", "scripts/backup.js", "--loop"]
+    environment:
+      DB_PATH: /data/meet.db
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: "14"
+    volumes:
+      - meet-data:/data
+      - ./backups:/backups
+
+  # (선택) 음성 통화 중계 서버. .env 의 TURN_SECRET 과 같은 비밀값을 사용한다.
+  coturn:
+    image: coturn/coturn:4
+    profiles: [turn]
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --realm=${DOMAIN}
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?.env 에 TURN_SECRET 을 설정하세요}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+
+volumes:
+  meet-data:
+  caddy-data:
+  caddy-config:

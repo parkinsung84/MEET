@@ -2,7 +2,9 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server } from 'socket.io';
+import { createAccountService } from './account.js';
 import { createAlertService } from './alerts.js';
+import { createAuth } from './auth.js';
 import { createCallService } from './calls.js';
 import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
@@ -14,7 +16,7 @@ import { createWebPush } from './push.js';
 import { attachRealtime } from './realtime.js';
 import { createRideService } from './rides.js';
 import { createSmsSender } from './sms.js';
-import { authRouter } from './routes/auth.js';
+import { authRouter, createAuthLimits } from './routes/auth.js';
 import { placesRouter } from './routes/places.js';
 import { ridesRouter } from './routes/rides.js';
 import { alertsRouter, notificationsRouter, usersRouter } from './routes/users.js';
@@ -36,9 +38,13 @@ export function createApp({
   push,
   exposeDevCode = true,
   callRingTimeoutMs,
+  authLimits = createAuthLimits(),
+  trustProxy = false,
+  production = false,
 }) {
   if (!secret) throw new Error('JWT secret is required');
   const db = openDatabase(dbPath);
+  const auth = createAuth(db, secret);
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
   const users = createUserService(db, { secret, mailer, sms, exposeDevCode });
@@ -60,23 +66,52 @@ export function createApp({
   const server = createServer(app);
   const io = new Server(server);
   notifier.attach(io);
+  // 로그인 토큰을 무효화하면 접속 중인 소켓도 끊는다
+  const account = createAccountService(db, {
+    users, auth, sms, mailer, secret, exposeDevCode,
+    onRevoke: (userId) => io.in(`user:${userId}`).disconnectSockets(true),
+  });
+
+  // 리버스 프록시(Caddy 등) 뒤에서 실제 접속 IP 를 쓰기 위한 설정 — 호출 제한에 사용
+  app.set('trust proxy', trustProxy);
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'same-origin',
+      // 마이크(음성 통화)·위치(현재 위치)는 이 사이트에서만, 카메라는 사용 안 함
+      'Permissions-Policy': 'microphone=(self), geolocation=(self), camera=()',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    });
+    if (production) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+  });
   const calls = createCallService(io, { rides, users, notifier, ringTimeoutMs: callRingTimeoutMs });
-  const realtime = attachRealtime(io, rides, secret, { calls });
+  const realtime = attachRealtime(io, rides, auth, { calls });
 
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(PUBLIC_DIR));
-  app.get('/api/health', (req, res) => res.json({ ok: true }));
+  app.get('/api/health', (req, res) => {
+    db.prepare('SELECT 1').get(); // DB 응답 확인
+    res.json({ ok: true });
+  });
   app.get('/api/config', (req, res) => res.json({
     naverMapKeyId: naver.mapKeyId,
     vapidPublicKey: pusher?.publicKey ?? null,
   }));
-  app.use('/api/auth', authRouter(db, secret, users));
-  app.use('/api/users', usersRouter(users, secret));
-  app.use('/api/notifications', notificationsRouter(notifier, secret));
-  app.use('/api/alerts', alertsRouter(alerts, users, secret));
-  app.use('/api/places', placesRouter(naver, secret));
+  app.use('/api/auth', authRouter(db, auth, users, account, authLimits));
+  // 안심 공유: 로그인 없이 토큰으로 조회 (추측할 수 없는 18바이트 랜덤 토큰)
+  app.get('/api/share/:token', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ride: rides.shared(req.params.token) });
+  });
+  app.use('/api/users', usersRouter(users, auth));
+  app.use('/api/notifications', notificationsRouter(notifier, auth));
+  app.use('/api/alerts', alertsRouter(alerts, users, auth));
+  app.use('/api/places', placesRouter(naver, auth));
   app.use('/api/rides', ridesRouter({
-    rides, users, alerts, inquiries, secret,
+    rides, users, alerts, inquiries, auth,
     changed: realtime.rideChanged,
     inquiryPosted: realtime.inquiryPosted,
   }));
@@ -94,6 +129,7 @@ export function createApp({
   function tick(now = Date.now()) {
     for (const rideId of rides.tick(now)) realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
     alerts.purgeExpired(now);
+    account.purgeExpired(now);
   }
 
   return {

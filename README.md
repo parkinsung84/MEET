@@ -16,6 +16,7 @@
 | **문의** | 참여 전에 **💬 먼저 물어보기** — 방 멤버들과 1:1 문의 대화로 짐, 늦을 수 있는지, 하차 위치 등을 조율. 문의자는 자기 대화만, 멤버는 문의 목록에서 모든 문의를 보고 누구나 답장 |
 | **참여** | 최종 도착지까지 / 가는 길에 먼저 내리기 선택. 성별·소속 조건, 차단 관계, 만석, **같은 시간대 중복 참여**(노쇼 원인)를 서버에서 차단 |
 | **만나기** | 방장이 정한 **만남 장소**(멤버에게만 공개, 변경 시 알림), 출발 10분 전 알림, 출발 1시간 전부터 **📍 도착했어요** 체크인 |
+| **탑승** | 누구나 **🚕 택시 차량번호**(차종·색상 메모)를 기록 → 동승자에게 알림. **🔗 안심 공유 링크**로 가족·지인이 로그인 없이 경로·출발 시간·차량번호·탑승자(닉네임·성별)를 보고 112/119 바로 걸기 (도착 12시간 뒤 자동 만료, 직접 해제 가능) |
 | **출발** | 방장이 출발 처리하며 **체크인 안 한 사람만 노쇼로 표시** 가능. 출발 10분 전 이후 나가면 **직전 취소** 기록. 출발 30분이 지나도 처리 안 된 방은 자동 정리(2명 이상 체크인 → 출발, 아니면 취소), 3시간 뒤 자동 도착 완료 |
 | **정산** | 결제한 사람이 실제 요금과 계좌를 입력 → **탄 거리 비례로 각자 몫 계산**해서 알림 → 송금했어요 / 받았어요 → 정산 완료 |
 | **평가** | 도착 완료 후 동승자 👍/👎. 평가 3건 이상부터 매너 점수 공개, 노쇼·직전취소 횟수와 함께 모든 카드에 표시 |
@@ -26,6 +27,9 @@
 - **본인정보 비공개**: 실명·생년월일·휴대폰 번호는 본인에게만 보이고(번호도 가려서 표시), 동승자에게는 **닉네임·성별**만 공개
 - **성별 표시**: 합승 카드의 방장, 탑승자 목록, 참여 문의, 통화 화면에 성별 표시
 - **학교·회사 소속 인증 (선택)**: `@snu.ac.kr` 같은 기관 메일이면 내 정보에서 이메일 인증 → 소속 표시 + **같은 소속끼리만 타는 합승** (gmail·naver 등 공용 메일 제외)
+- **약관·개인정보 동의**: 가입 시 [필수] 만 19세 이상 · 이용약관 · 개인정보 수집·이용(항목·목적·보유기간 고지) · 위치기반서비스 약관. 약관 버전(`src/legal.js`)을 올리면 기존 회원도 다음 접속 때 재동의. 약관 초안: `public/legal/` (**법률 검토 필요**)
+- **회원 탈퇴**: 내 정보 → 회원 탈퇴 (비밀번호 확인). 개인정보 즉시 파기, 합승 기록·채팅은 '탈퇴한 사용자'로 익명화, 노쇼·직전취소 횟수만 휴대폰 번호 해시와 함께 1년 보관(같은 번호로 재가입하면 승계). 진행 중인 합승·미송금 정산이 있으면 먼저 정리
+- **계정 보안**: 로그인 실패 제한(계정별 15분 5회, IP별 20회), 가입·비밀번호 찾기 IP별 제한, 비밀번호 찾기(인증된 휴대폰으로 문자 — 휴대폰 인증 전 계정은 이메일, 가입 여부 비노출), 비밀번호 변경, **모든 기기에서 로그아웃**(토큰 버전 — 비밀번호 변경·재설정·탈퇴 시에도 기존 로그인과 실시간 연결 즉시 해제), 보안 헤더(HSTS 등)
 - **차단 / 신고**: 차단하면 서로의 방이 보이지 않고 같은 방 참여·통화 불가. 신고는 `reports` 테이블에 쌓임
 - 참여 전 문의는 **참여 조건(성별·소속·차단)을 만족하는 인증 사용자만** 가능하고, 답장을 받기 전에는 연속 5개까지만 보낼 수 있음 (도배 방지). 대화는 문의자와 방 멤버만 볼 수 있음
 - 만남 장소·하차 지점·정산 계좌는 **멤버에게만** 공개. 나가거나 노쇼 처리되면 실시간 채널에서도 즉시 제외
@@ -65,6 +69,8 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 
 | 환경변수 | 설명 |
 | --- | --- |
+| `DOMAIN` | 배포 도메인 (docker compose 의 Caddy 가 HTTPS 인증서 자동 발급) |
+| `TRUST_PROXY` | 프록시 뒤에서 실행할 때 `1` (실제 접속 IP로 호출 제한) — compose 에서는 자동 |
 | `PORT` | 서버 포트 (기본 `3000`) |
 | `DB_PATH` | SQLite 파일 경로 (기본 `meet.db`) |
 | `JWT_SECRET` | 토큰 서명 키. 운영 환경에서는 반드시 설정 |
@@ -77,6 +83,8 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` | 네이버 클라우드 Maps Client ID / Client Secret (선택) |
 | `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | 네이버 개발자센터 검색 API Client ID / Secret (선택) |
 
+> 🚀 **서버 배포는 [DEPLOY.md](DEPLOY.md)** — Docker + Caddy(자동 HTTPS) + 매일 백업 + (선택) coturn, 공개 전 실제 기기 확인 체크리스트 포함
+>
 > ⚠️ 운영 배포 시: `NODE_ENV=production`, `JWT_SECRET`, SENS 문자 설정을 반드시 하세요 (없으면 아무도 가입을 마칠 수 없음). 웹 푸시·위치·음성 통화는 **HTTPS** 에서만 동작합니다 (localhost 제외). 음성 통화를 안정적으로 쓰려면 TURN 서버(coturn 직접 운영 또는 유료 서비스)가 필요합니다.
 
 네이버 키가 없어도 앱은 동작합니다. 이때는 주요 거점 18곳만 검색되고, 지도는 숨겨지며, 요금은 직선거리로 추정합니다.
@@ -107,8 +115,11 @@ src/
   index.js          서버 진입점 (+ 1분 주기 작업 시작)
   app.js            서비스 조립, Express/Socket.IO 구성
   db.js             SQLite 스키마 + 기존 DB 자동 마이그레이션
-  auth.js           비밀번호 해시, JWT, 인증 미들웨어
-  users.js          본인정보·휴대폰 인증, 소속 이메일 인증, 매너 지표, 평가, 차단, 신고
+  auth.js           비밀번호 해시, 로그인 토큰(버전 기반 강제 만료)
+  account.js        비밀번호 변경·찾기, 모든 기기 로그아웃, 회원 탈퇴(개인정보 파기·익명화)
+  legal.js          약관·동의 항목과 버전
+  ratelimit.js      로그인·가입 호출 제한
+  users.js          본인정보·휴대폰 인증, 약관 동의, 소속 이메일 인증, 매너 지표, 평가, 차단, 신고
   sms.js            인증문자 발송 (네이버 클라우드 SENS / 개발용 콘솔)
   calls.js          탑승자 음성 통화 신호 중계 (WebRTC), TURN 임시 계정
   rides.js          합승 도메인: 검색·매칭, 참여/나가기, 체크인, 노쇼, 정산, 주기 작업
@@ -129,7 +140,12 @@ public/             모바일 웹앱 (빌드 과정 없는 Vanilla JS, PWA)
   push.js / sw.js   웹 푸시 구독 / 서비스워커
   call.js           음성 통화 (마이크, WebRTC 연결, 벨소리, 통화 화면)
   maps.js           네이버 지도 (선택)
-test/               node:test 기반 테스트 (API·흐름·네이버 연동·실시간)
+  legal/            이용약관 · 개인정보처리방침 · 위치기반서비스 약관 (초안)
+  share.html        안심 공유 페이지 (로그인 불필요)
+scripts/backup.js   SQLite 온라인 백업
+deploy/Caddyfile    HTTPS 리버스 프록시 설정
+Dockerfile, docker-compose.yml, DEPLOY.md   서버 배포
+test/               node:test 기반 테스트 (API·흐름·계정·통화·네이버 연동·실시간·백업)
 ```
 
 ## API
@@ -144,6 +160,11 @@ test/               node:test 기반 테스트 (API·흐름·네이버 연동·�
 | PUT | `/api/auth/identity` | 본인정보 입력/수정 `{ name, birthDate, phone }` (휴대폰 인증 전까지) → 인증문자 발송 |
 | POST | `/api/auth/phone/send` · `/api/auth/phone/verify` | 인증문자 재발송 / `{ code }` 휴대폰 인증 |
 | POST | `/api/auth/email/send` · `/api/auth/email/verify` | 학교·회사 소속 이메일 인증 (선택) |
+| POST | `/api/auth/consents` | 약관 (재)동의 `{ kinds: ['age','terms','privacy','location'] }` |
+| POST | `/api/auth/password/forgot` · `/api/auth/password/reset` | 비밀번호 찾기 `{ email }` / 재설정 `{ email, code, password }` |
+| POST | `/api/auth/password` | 비밀번호 변경 `{ currentPassword, newPassword }` → 새 토큰 |
+| POST | `/api/auth/logout-all` | 모든 기기에서 로그아웃 |
+| DELETE | `/api/auth/me` | 회원 탈퇴 `{ password }` |
 | GET | `/api/config` | 공개 설정 (`naverMapKeyId`, `vapidPublicKey`) |
 | GET | `/api/rides?originLat&originLng&destLat&destLng&radiusKm&from&to` | 합승 검색 (시간 범위, 가는 길 매칭) |
 | GET | `/api/rides/mine` | 내 합승 |
@@ -157,6 +178,9 @@ test/               node:test 기반 테스트 (API·흐름·네이버 연동·�
 | POST | `/api/rides/:id/settlement` | 정산 요청 `{ actualFare, account }` (결제한 사람) |
 | POST | `/api/rides/:id/settlement/paid` | 송금 완료 `{ userId? }` (본인, 또는 결제자가 수령 확인) |
 | POST | `/api/rides/:id/ratings` | 평가 `{ ratings: [{ userId, good }] }` |
+| PUT | `/api/rides/:id/taxi` | 택시 차량번호 기록 `{ plate, note? }` |
+| POST · DELETE | `/api/rides/:id/share` | 안심 공유 링크 발급 / 내 링크 해제 |
+| GET | `/api/share/:token` | 안심 공유 조회 (로그인 불필요) |
 | GET | `/api/rides/:id/messages?after=<id>` | 채팅 내역 (멤버) |
 | GET | `/api/rides/:id/inquiries` | 참여 문의 목록 (멤버) |
 | GET · POST | `/api/rides/:id/inquiries/:guestId` | 문의 대화 보기 / 보내기 `{ body }` (문의자 본인 또는 멤버) |
@@ -176,9 +200,9 @@ Socket.IO (`auth: { token }` 로 연결): `ride:subscribe(rideId, ack)`, `chat:s
 
 ## 아직 남은 것 (로드맵)
 
+- **공개 전 필수**: 약관 초안의 운영자 정보 채우기 + 법률 검토, 위치기반서비스사업 신고, 위치정보 이용·제공 사실 확인자료 기록 기능, 실제 서버 배포 후 문자·푸시·통화 실기기 확인 ([DEPLOY.md](DEPLOY.md) 체크리스트)
 - **통신사 본인인증**: 지금의 문자 인증은 "그 번호를 가진 사람"까지만 확인하고, 실명·생년월일·성별은 본인이 입력한 값 → "동성만" 조건을 완전히 믿으려면 PASS 본인인증(포트원 등, 건당 유료)으로 이 정보를 통신사에서 받아와야 함
+- **앱 안 긴급 버튼**: 이동 중 112 신고·실시간 위치 공유 (안심 공유 페이지에는 112/119 버튼 있음)
 - **신고 처리 도구**: 신고는 저장만 됨 → 관리자 화면, 반복 노쇼·신고 사용자 이용 제한
 - **간편 송금**: 지금은 계좌 복사 → 토스/카카오페이 송금 링크 연동
-- **이용 제한**: 검색·장소 API 사용자별 호출 제한(rate limit)
-- **운영 인프라**: PostgreSQL + PostGIS(위치 검색), Redis 어댑터(Socket.IO 다중 서버), 주기 작업 단일 실행 보장
-- **법률 검토**: 택시 합승 관련 규정(택시발전법 등) 확인 — 특히 수수료를 받거나 중개 서비스로 운영할 경우
+- **운영 인프라**: 서버 여러 대로 늘릴 때 PostgreSQL + PostGIS, Redis(Socket.IO·호출 제한·통화 상태), 오류 추적·모니터링

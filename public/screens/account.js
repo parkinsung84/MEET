@@ -1,7 +1,7 @@
 import { rideCard, trustChips } from '../components.js';
-import { api, formatTime, listen, logout, refreshMe, state } from '../core.js';
+import { api, formatTime, listen, logout, refreshMe, setSession, state } from '../core.js';
 import { disablePush, enablePush, pushStatus } from '../push.js';
-import { h, toast } from '../ui.js';
+import { ask, h, sheet, toast } from '../ui.js';
 
 export function myRidesScreen() {
   const root = h('div', {}, h('h1', {}, '내 합승'));
@@ -45,7 +45,8 @@ function pushCard() {
       denied: '알림이 차단되어 있어요. 브라우저 사이트 설정에서 알림을 허용해 주세요.',
       unsupported: '이 브라우저는 푸시 알림을 지원하지 않아요. 아이폰은 Safari 공유 → "홈 화면에 추가" 후 앱에서 켜 주세요.',
     }[status];
-    box.replaceChildren(
+    // h() 로 감싸 false 자식(상태에 맞지 않는 버튼)을 걸러낸다
+    box.replaceChildren(h('div', { class: 'stack' },
       h('h2', {}, '📲 푸시 알림'),
       h('p', { class: 'muted' }, text),
       status === 'off' && h('button', {
@@ -55,7 +56,7 @@ function pushCard() {
         },
       }, '알림 켜기'),
       status === 'on' && h('button', { class: 'secondary', onclick: async () => { await disablePush(); render(); } }, '이 기기 알림 끄기'),
-    );
+    ));
   }
   render();
   return box;
@@ -123,6 +124,68 @@ function orgCard(user) {
     }, '인증')));
 }
 
+/** 계정 보안: 비밀번호 변경, 모든 기기 로그아웃, 회원 탈퇴 */
+function securityCard() {
+  const current = h('input', { type: 'password', placeholder: '현재 비밀번호', autocomplete: 'current-password', 'aria-label': '현재 비밀번호' });
+  const next = h('input', { type: 'password', placeholder: '새 비밀번호 (8자 이상)', autocomplete: 'new-password', 'aria-label': '새 비밀번호' });
+  const changeForm = h('form', { class: 'stack', hidden: true }, current, next, h('button', {}, '변경하기'));
+  changeForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const { token } = await api('POST', '/auth/password', { currentPassword: current.value, newPassword: next.value });
+      setSession(token, state.user);
+      toast('비밀번호를 바꿨어요. 다른 기기에서는 로그아웃되었어요.');
+      changeForm.hidden = true;
+      current.value = next.value = '';
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  function openWithdraw() {
+    const password = h('input', { type: 'password', placeholder: '비밀번호 확인', autocomplete: 'current-password', 'aria-label': '탈퇴 비밀번호 확인' });
+    sheet('회원 탈퇴', h('div', { class: 'stack' },
+      h('p', {}, '탈퇴하면 이메일·실명·생년월일·휴대폰 번호 등 개인정보가 즉시 삭제되고 되돌릴 수 없어요.'),
+      h('ul', { class: 'muted' },
+        h('li', {}, '함께 탄 합승 기록과 채팅은 "탈퇴한 사용자"로 익명화되어 남아요.'),
+        h('li', {}, '노쇼·직전취소 횟수는 부정 이용 방지를 위해 1년간 보관되고, 같은 번호로 다시 가입하면 이어져요.'),
+        h('li', {}, '진행 중인 합승이나 보내지 않은 정산이 있으면 먼저 정리해야 해요.')),
+      password), [
+      { label: '취소', class: 'secondary', onClick: (close) => close() },
+      {
+        label: '탈퇴하기',
+        class: 'danger',
+        onClick: async (close) => {
+          try {
+            await api('DELETE', '/auth/me', { password: password.value });
+            close();
+            toast('탈퇴가 완료되었어요. 그동안 이용해 주셔서 고마워요.');
+            logout();
+          } catch (err) {
+            toast(err.message);
+          }
+        },
+      },
+    ]);
+  }
+
+  return h('div', { class: 'card stack' },
+    h('h2', {}, '🔐 계정 보안'),
+    h('button', { class: 'secondary', onclick: () => { changeForm.hidden = !changeForm.hidden; } }, '비밀번호 변경'),
+    changeForm,
+    h('button', {
+      class: 'secondary',
+      onclick: async () => {
+        if (!await ask('모든 기기에서 로그아웃할까요?', '폰을 잃어버렸거나 다른 사람이 로그인한 것 같을 때 사용하세요. 이 기기도 로그아웃돼요.', { confirmLabel: '모두 로그아웃', danger: true })) return;
+        try {
+          await api('POST', '/auth/logout-all');
+          logout();
+        } catch (err) { toast(err.message); }
+      },
+    }, '모든 기기에서 로그아웃'),
+    h('button', { class: 'link danger-text', onclick: openWithdraw }, '회원 탈퇴'));
+}
+
 export function profileScreen() {
   const root = h('div', {}, h('h1', {}, '내 정보'));
   refreshMe().then((user) => {
@@ -144,7 +207,12 @@ export function profileScreen() {
       pushCard(),
       alertsCard(),
       blockedCard(),
+      securityCard(),
       h('button', { class: 'secondary wide', onclick: logout }, '로그아웃'),
+      h('p', { class: 'legal-links muted' },
+        h('a', { href: '/legal/terms.html', target: '_blank' }, '이용약관'), ' · ',
+        h('a', { href: '/legal/privacy.html', target: '_blank' }, h('strong', {}, '개인정보처리방침')), ' · ',
+        h('a', { href: '/legal/location.html', target: '_blank' }, '위치기반서비스 이용약관')),
     ));
   }).catch((err) => toast(err.message));
   return root;

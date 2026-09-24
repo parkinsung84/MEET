@@ -143,6 +143,42 @@ CREATE TABLE IF NOT EXISTS sms_sends (
   sent_at TEXT NOT NULL
 );
 
+-- 약관·개인정보 동의 기록 (종류별 버전과 동의 시각)
+CREATE TABLE IF NOT EXISTS user_consents (
+  user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind      TEXT NOT NULL,
+  version   TEXT NOT NULL,
+  agreed_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  channel    TEXT NOT NULL,
+  code_hash  TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  sent_at    TEXT NOT NULL
+);
+
+-- 탈퇴 후 재가입으로 노쇼·직전취소 기록을 지우지 못하도록 1년간 보관 (휴대폰 번호는 해시로만 저장)
+CREATE TABLE IF NOT EXISTS withdrawn_accounts (
+  phone_hash        TEXT NOT NULL,
+  no_show_count     INTEGER NOT NULL,
+  late_cancel_count INTEGER NOT NULL,
+  withdrawn_at      TEXT NOT NULL
+);
+
+-- 안심 공유 링크: 로그인하지 않은 가족·지인이 합승 경로와 택시 차량번호를 볼 수 있다
+CREATE TABLE IF NOT EXISTS ride_shares (
+  token      TEXT PRIMARY KEY,
+  ride_id    INTEGER NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  revoked_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_withdrawn_phone ON withdrawn_accounts(phone_hash);
 CREATE INDEX IF NOT EXISTS idx_sms_sends ON sms_sends(phone, sent_at);
 CREATE INDEX IF NOT EXISTS idx_sms_sends_user ON sms_sends(user_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_inquiry_thread ON inquiry_messages(ride_id, guest_id, id);
@@ -160,6 +196,8 @@ const COLUMNS = {
     birth_date: 'TEXT',              // YYYY-MM-DD
     phone: 'TEXT',                   // 숫자만, 예: 01012345678
     phone_verified: 'INTEGER NOT NULL DEFAULT 0', // 휴대폰 인증 = 서비스 이용 가능
+    token_version: 'INTEGER NOT NULL DEFAULT 0',  // 올리면 기존 로그인 토큰 전부 무효
+    deleted_at: 'TEXT',              // 회원 탈퇴 시각 (개인정보는 즉시 파기, 행은 익명화)
     org_domain: 'TEXT',              // 학교/회사 이메일 도메인 (인증 완료 시)
     no_show_count: 'INTEGER NOT NULL DEFAULT 0',
     late_cancel_count: 'INTEGER NOT NULL DEFAULT 0',
@@ -176,6 +214,10 @@ const COLUMNS = {
     actual_fare: 'INTEGER',
     payer_account: 'TEXT',
     completed_at: 'TEXT',
+    taxi_plate: 'TEXT',              // 탑승한 택시 차량번호 (예: 서울12가3456)
+    taxi_note: 'TEXT',               // 차종·색상 등 메모
+    taxi_recorded_by: 'INTEGER',
+    taxi_recorded_at: 'TEXT',
   },
   ride_members: {
     dropoff_name: 'TEXT',            // 가는 길에 먼저 내리는 경우 하차 지점 (NULL = 최종 도착지)
@@ -200,6 +242,10 @@ function migrate(db) {
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
+  if (path !== ':memory:') {
+    // 읽기와 쓰기가 서로 막지 않도록 (백업 중에도 서비스 가능)
+    db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+  }
   db.exec(SCHEMA);
   migrate(db);
   return db;

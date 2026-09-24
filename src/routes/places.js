@@ -1,11 +1,10 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
 import { badRequest, HttpError } from '../errors.js';
 import { searchPresetPlaces } from '../places.js';
 
-export function placesRouter(naver, secret) {
+export function placesRouter(naver, auth) {
   const router = Router();
-  router.use(requireAuth(secret));
+  router.use(auth.required);
   const searchConfigured = naver.searchEnabled || naver.mapsEnabled;
 
   const upstream = (err) => {

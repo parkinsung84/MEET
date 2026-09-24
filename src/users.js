@@ -1,4 +1,5 @@
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, createHmac, randomInt } from 'node:crypto';
+import { CONSENT_KINDS, CONSENTS } from './legal.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
 
 // 누구나 가입할 수 있는 메일 서비스 — 소속(학교/회사) 인증으로 보지 않는다
@@ -11,6 +12,7 @@ const CODE_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const MIN_RATINGS_FOR_SCORE = 3;
+const WITHDRAWN_RECORD_MS = 365 * 24 * 3600 * 1000; // 탈퇴 후 노쇼 기록 보관 기간
 const MAX_SMS_PER_DAY = 5;        // 번호별 하루 인증문자 발송 한도
 const MAX_SMS_PER_USER_DAY = 10;  // 계정별 하루 한도 (번호를 바꿔 가며 보내는 것 방지)
 export const MIN_AGE = 19;        // 모르는 사람과 타는 서비스이므로 성인만 가입 (민법상 성년)
@@ -71,6 +73,13 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
     bumpPhoneAttempts: db.prepare('UPDATE phone_verifications SET attempts = attempts + 1 WHERE user_id = ?'),
     deletePhoneVerification: db.prepare('DELETE FROM phone_verifications WHERE user_id = ?'),
     markPhoneVerified: db.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?'),
+    consents: db.prepare('SELECT kind, version FROM user_consents WHERE user_id = ?'),
+    putConsent: db.prepare(`INSERT INTO user_consents (user_id, kind, version, agreed_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, kind) DO UPDATE SET version = excluded.version, agreed_at = excluded.agreed_at`),
+    withdrawnRecord: db.prepare(`SELECT SUM(no_show_count) AS noShows, SUM(late_cancel_count) AS lateCancels
+      FROM withdrawn_accounts WHERE phone_hash = ? AND withdrawn_at > ?`),
+    restoreCounts: db.prepare(`UPDATE users SET no_show_count = no_show_count + ?, late_cancel_count = late_cancel_count + ?
+      WHERE id = ?`),
     smsCount: db.prepare('SELECT COUNT(*) AS n FROM sms_sends WHERE phone = ? AND sent_at > ?'),
     smsCountByUser: db.prepare('SELECT COUNT(*) AS n FROM sms_sends WHERE user_id = ? AND sent_at > ?'),
     logSms: db.prepare('INSERT INTO sms_sends (phone, user_id, sent_at) VALUES (?, ?, ?)'),
@@ -91,6 +100,14 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
 
   const hashCode = (userId, code, kind = 'email') => createHash('sha256').update(`${secret}:${kind}:${userId}:${code}`).digest('hex');
   const newCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
+  /** 휴대폰 번호 해시 (탈퇴자 기록 대조용 — 번호 자체는 저장하지 않음) */
+  const phoneHash = (phone) => createHmac('sha256', secret).update(`phone:${phone}`).digest('hex');
+
+  /** 아직 동의하지 않았거나 약관 버전이 바뀐 동의 항목 */
+  function missingConsents(userId) {
+    const agreed = new Map(stmt.consents.all(userId).map((c) => [c.kind, c.version]));
+    return CONSENT_KINDS.filter((kind) => agreed.get(kind) !== CONSENTS[kind].version);
+  }
 
   function load(userId) {
     const user = stmt.byId.get(userId);
@@ -127,7 +144,22 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
         // 학교/회사 메일이면 소속 인증 가능
         orgCandidate: orgDomainOf(u.email),
         org: u.org_domain, stats: stats(u.id),
+        // 다시 동의해야 하는 약관 (약관 개정 시)
+        consentsRequired: missingConsents(u.id),
       };
+    },
+
+    phoneHash,
+    missingConsents,
+
+    /** 약관 동의 기록. kinds 에 필수 항목이 모두 있어야 한다 */
+    agree(userId, kinds) {
+      const set = new Set(Array.isArray(kinds) ? kinds : []);
+      const missing = CONSENT_KINDS.filter((k) => !set.has(k));
+      if (missing.length) throw badRequest(`필수 항목에 동의해 주세요: ${missing.map((k) => CONSENTS[k].label).join(', ')}`);
+      const now = new Date().toISOString();
+      for (const kind of CONSENT_KINDS) stmt.putConsent.run(userId, kind, CONSENTS[kind].version, now);
+      return service.me(userId);
     },
 
     /** 다른 사용자에게 보여주는 정보 (실명·생년월일·연락처 제외) */
@@ -141,6 +173,7 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
 
     requireVerified(userId) {
       if (!load(userId).phone_verified) throw forbidden('휴대폰 본인 확인 후 이용할 수 있어요.');
+      if (missingConsents(userId).length) throw forbidden('바뀐 약관에 동의한 뒤 이용할 수 있어요.');
     },
 
     /** 본인정보 입력/수정 (휴대폰 인증 전까지만) */
@@ -196,6 +229,9 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
         // 동시에 같은 번호로 인증한 다른 계정이 있는 경우 (유니크 인덱스)
         throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
       }
+      // 1년 안에 탈퇴한 같은 번호의 노쇼·직전취소 기록을 이어받는다 (재가입으로 기록 세탁 방지)
+      const prev = stmt.withdrawnRecord.get(phoneHash(user.phone), new Date(Date.now() - WITHDRAWN_RECORD_MS).toISOString());
+      if (prev.noShows || prev.lateCancels) stmt.restoreCounts.run(prev.noShows ?? 0, prev.lateCancels ?? 0, userId);
       return service.me(userId);
     },
 

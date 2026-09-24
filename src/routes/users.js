@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
 import { badRequest } from '../errors.js';
 
 const targetId = (req) => {
@@ -8,9 +7,9 @@ const targetId = (req) => {
   return id;
 };
 
-export function usersRouter(users, secret) {
+export function usersRouter(users, auth) {
   const router = Router();
-  router.use(requireAuth(secret));
+  router.use(auth.required);
 
   router.get('/blocked', (req, res) => res.json({ users: users.listBlocked(req.userId) }));
   router.get('/:id', (req, res) => res.json({ user: users.profile(targetId(req)) }));
@@ -29,9 +28,9 @@ export function usersRouter(users, secret) {
   return router;
 }
 
-export function notificationsRouter(notifier, secret) {
+export function notificationsRouter(notifier, auth) {
   const router = Router();
-  router.use(requireAuth(secret));
+  router.use(auth.required);
   router.get('/', (req, res) => res.json(notifier.list(req.userId)));
   router.post('/read', (req, res) => {
     notifier.markAllRead(req.userId);
@@ -48,9 +47,9 @@ export function notificationsRouter(notifier, secret) {
   return router;
 }
 
-export function alertsRouter(alerts, users, secret) {
+export function alertsRouter(alerts, users, auth) {
   const router = Router();
-  router.use(requireAuth(secret));
+  router.use(auth.required);
   router.get('/', (req, res) => res.json({ alerts: alerts.list(req.userId) }));
   router.post('/', (req, res) => {
     users.requireVerified(req.userId);

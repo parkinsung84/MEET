@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test';
 import { io as connect } from 'socket.io-client';
 import { createApp } from '../src/app.js';
 import { iceServersFor } from '../src/calls.js';
-import { identity } from './helpers.js';
+import { identity, relaxedLimits } from './helpers.js';
 
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
 const GANGNAM = { name: '강남역', lat: 37.4979, lng: 127.0276 };
@@ -65,7 +65,7 @@ async function rideWith(host, ...members) {
 }
 
 before(async () => {
-  ({ server, calls } = createApp({ secret: 'call-secret', push: null, callRingTimeoutMs: 300 }));
+  ({ server, calls } = createApp({ secret: 'call-secret', authLimits: relaxedLimits(), push: null, callRingTimeoutMs: 300 }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://localhost:${server.address().port}`;
 });

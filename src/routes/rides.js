@@ -1,14 +1,13 @@
 import { Router } from 'express';
-import { requireAuth } from '../auth.js';
 
 /**
  * rides: ride service, users: 사용자 서비스(평가), alerts: 경로 알림, inquiries: 참여 전 문의
  * changed(rideId): 방 상태가 바뀌었을 때 실시간 갱신을 보내는 콜백
  * inquiryPosted(message): 문의 메시지를 실시간으로 전달하는 콜백
  */
-export function ridesRouter({ rides, users, alerts, inquiries, secret, changed, inquiryPosted }) {
+export function ridesRouter({ rides, users, alerts, inquiries, auth, changed, inquiryPosted }) {
   const router = Router();
-  router.use(requireAuth(secret));
+  router.use(auth.required);
 
   const notifyChange = (rideId) => changed(rideId).catch((err) => console.error('[realtime]', err));
   const respond = (res, ride, extra = {}) => {
@@ -54,6 +53,17 @@ export function ridesRouter({ rides, users, alerts, inquiries, secret, changed, 
 
   router.post('/:id/settlement/paid', (req, res) => {
     respond(res, rides.markPaid(req.params.id, req.userId, req.body?.userId ?? req.userId));
+  });
+
+  router.put('/:id/taxi', (req, res) => respond(res, rides.recordTaxi(req.params.id, req.userId, req.body ?? {})));
+
+  router.post('/:id/share', (req, res) => {
+    const token = rides.createShare(req.params.id, req.userId);
+    res.status(201).json({ token, url: `/share.html#${token}` });
+  });
+  router.delete('/:id/share', (req, res) => {
+    rides.revokeShares(req.params.id, req.userId);
+    res.json({ ok: true });
   });
 
   router.post('/:id/ratings', (req, res) => {

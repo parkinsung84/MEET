@@ -1,0 +1,13 @@
+# Caddy: DOMAIN 으로 들어온 요청을 앱으로 전달하고, HTTPS 인증서를 자동 발급·갱신한다 (Let's Encrypt).
+# 웹소켓(채팅·음성 통화 신호)도 그대로 전달된다.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+	header -Server
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 10
+		}
+	}
+}

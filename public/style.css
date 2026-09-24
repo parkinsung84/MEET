@@ -192,3 +192,29 @@ button.call { background: #16a34a; color: #fff; }
 .call-actions { display: flex; gap: 12px; margin-top: 24px; width: 100%; }
 .call-btn { flex: 1; padding: 16px; border-radius: 999px; font-size: 1rem; }
 button.ok { background: #16a34a; color: #fff; }
+
+/* ---------- 약관 동의 ---------- */
+.consents { display: grid; gap: 6px; }
+.consent-all { padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.consent-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 4px; }
+.consent-row a { font-size: .85rem; color: var(--muted); }
+.privacy-summary { font-size: .82rem; }
+.privacy-summary summary { cursor: pointer; color: var(--muted); }
+.privacy-summary table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.privacy-summary th, .privacy-summary td { border: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }
+.link-center { text-align: center; color: var(--muted); font-size: .9rem; }
+.danger-text { color: var(--danger) !important; }
+.legal-links { text-align: center; font-size: .8rem; }
+
+/* ---------- 택시 차량번호 / 안심 공유 ---------- */
+.plate-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.plate {
+  display: inline-block; padding: 6px 12px; border: 2px solid var(--ink); border-radius: 8px;
+  font-weight: 800; font-size: 1.2rem; letter-spacing: .04em; background: #fff; color: #111;
+}
+.plate.big { font-size: 1.8rem; }
+.share-status { padding: 12px; border-radius: 10px; background: var(--bg); }
+.share-status.departed { background: #dbeafe; color: #1e3a8a; }
+.share-status.completed { background: #dcfce7; color: #166534; }
+.emergency { border-color: var(--danger); }
+.danger-btn { background: var(--danger); color: #fff; }

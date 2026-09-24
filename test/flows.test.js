@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
-import { identity } from './helpers.js';
+import { identity, relaxedLimits } from './helpers.js';
 
 // 서울역 → 강남역 (직선 경로의 중간 지점은 '가는 길 하차' 매칭 대상)
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
@@ -68,7 +68,7 @@ const q = (params) => `?${new URLSearchParams(params)}`;
 
 before(async () => {
   let app;
-  ({ server, tick, ...app } = createApp({ secret: 'flow-secret', push: fakePush }));
+  ({ server, tick, ...app } = createApp({ secret: 'flow-secret', authLimits: relaxedLimits(), push: fakePush }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://localhost:${server.address().port}`;
 });
