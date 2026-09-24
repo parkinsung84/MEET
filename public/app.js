@@ -1,3 +1,4 @@
+import { hangup, initCalls } from './call.js';
 import { api, connectSocket, state } from './core.js';
 import { loadNaverMaps } from './maps.js';
 import { registerServiceWorker, syncPush } from './push.js';
@@ -76,7 +77,10 @@ window.addEventListener('notification', (e) => {
   toast(`${n.title} · ${n.body}`);
 });
 window.addEventListener('notifications:read', () => { unread = 0; renderNav(); });
+// 음성 통화는 어느 화면에서든 받을 수 있도록 소켓 연결 때마다 등록
+window.addEventListener('socket:ready', (e) => initCalls(e.detail));
 window.addEventListener('session:ended', () => {
+  hangup();
   if (location.hash === '#/login') route();
   else location.hash = '#/login';
 });

@@ -127,6 +127,24 @@ CREATE TABLE IF NOT EXISTS inquiry_messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS phone_verifications (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  phone      TEXT NOT NULL,
+  code_hash  TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  sent_at    TEXT NOT NULL
+);
+
+-- 문자 발송 기록 (번호별·계정별 하루 발송 횟수 제한 — 문자 폭탄·비용 방지)
+CREATE TABLE IF NOT EXISTS sms_sends (
+  phone   TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  sent_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_sends ON sms_sends(phone, sent_at);
+CREATE INDEX IF NOT EXISTS idx_sms_sends_user ON sms_sends(user_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_inquiry_thread ON inquiry_messages(ride_id, guest_id, id);
 CREATE INDEX IF NOT EXISTS idx_rides_status_depart ON rides(status, depart_at);
 CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, id);
@@ -137,7 +155,11 @@ CREATE INDEX IF NOT EXISTS idx_ride_alerts_to ON ride_alerts(depart_to);
 // 이전 버전 DB 파일에 새 컬럼을 추가한다 (ALTER TABLE ADD COLUMN 은 NOT NULL 이면 기본값 필요)
 const COLUMNS = {
   users: {
-    email_verified: 'INTEGER NOT NULL DEFAULT 0',
+    email_verified: 'INTEGER NOT NULL DEFAULT 0', // 학교/회사 소속 인증용 (선택)
+    real_name: 'TEXT',               // 본인정보 (다른 사용자에게 공개하지 않음)
+    birth_date: 'TEXT',              // YYYY-MM-DD
+    phone: 'TEXT',                   // 숫자만, 예: 01012345678
+    phone_verified: 'INTEGER NOT NULL DEFAULT 0', // 휴대폰 인증 = 서비스 이용 가능
     org_domain: 'TEXT',              // 학교/회사 이메일 도메인 (인증 완료 시)
     no_show_count: 'INTEGER NOT NULL DEFAULT 0',
     late_cancel_count: 'INTEGER NOT NULL DEFAULT 0',
@@ -172,6 +194,8 @@ function migrate(db) {
       if (!existing.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   }
+  // 인증된 휴대폰 번호 하나당 계정 하나
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verified_phone ON users(phone) WHERE phone_verified = 1');
 }
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { io as connect } from 'socket.io-client';
 import { createApp } from '../src/app.js';
+import { identity } from './helpers.js';
 
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
 const GANGNAM = { name: '강남역', lat: 37.4979, lng: 127.0276 };
@@ -27,13 +28,13 @@ let seq = 0;
 async function register(gender = 'male') {
   seq += 1;
   const res = await api('POST', '/auth/register', {
-    body: { email: `user${seq}@test.com`, password: 'password123', nickname: `유저${seq}`, gender },
+    body: { email: `user${seq}@test.com`, password: 'password123', nickname: `유저${seq}`, gender, ...identity() },
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   const { token, devCode } = res.body;
-  const verified = await api('POST', '/auth/verify', { token, body: { code: devCode } });
+  const verified = await api('POST', '/auth/phone/verify', { token, body: { code: devCode } });
   assert.equal(verified.status, 200, JSON.stringify(verified.body));
-  return { token, user: verified.body.user };
+  return { token, user: { ...verified.body.user, email: `user${seq}@test.com` } };
 }
 
 const rideInput = (overrides = {}) => ({
@@ -71,7 +72,7 @@ describe('auth', () => {
   test('중복 이메일은 409', async () => {
     const { user } = await register();
     const res = await api('POST', '/auth/register', {
-      body: { email: user.email, password: 'password123', nickname: 'x', gender: 'male' },
+      body: { email: user.email, password: 'password123', nickname: 'x', gender: 'male', ...identity() },
     });
     assert.equal(res.status, 409);
   });

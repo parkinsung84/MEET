@@ -11,13 +11,46 @@ const CODE_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const MIN_RATINGS_FOR_SCORE = 3;
+const MAX_SMS_PER_DAY = 5;        // 번호별 하루 인증문자 발송 한도
+const MAX_SMS_PER_USER_DAY = 10;  // 계정별 하루 한도 (번호를 바꿔 가며 보내는 것 방지)
+export const MIN_AGE = 19;        // 모르는 사람과 타는 서비스이므로 성인만 가입 (민법상 성년)
+
+const NAME_RE = /^[가-힣a-zA-Z][가-힣a-zA-Z\s]{0,18}[가-힣a-zA-Z]$/;
+const PHONE_RE = /^01[016789]\d{7,8}$/;
+
+/** 만 나이 */
+export function ageOn(birthDate, today = new Date()) {
+  const [y, m, d] = birthDate.split('-').map(Number);
+  let age = today.getFullYear() - y;
+  if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age -= 1;
+  return age;
+}
+
+/** 본인정보 검증·정규화: { name, birthDate: 'YYYY-MM-DD', phone: '01012345678' } */
+export function normalizeIdentity({ name, birthDate, phone } = {}) {
+  const realName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
+  if (!NAME_RE.test(realName)) throw badRequest('이름을 정확히 입력해 주세요. (한글/영문 2~20자)');
+  const birth = typeof birthDate === 'string' ? birthDate.trim() : '';
+  const date = new Date(`${birth}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birth) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== birth) {
+    throw badRequest('생년월일을 정확히 입력해 주세요.');
+  }
+  const age = ageOn(birth);
+  if (age > 120 || age < 0) throw badRequest('생년월일을 정확히 입력해 주세요.');
+  if (age < MIN_AGE) throw badRequest(`만 ${MIN_AGE}세 이상만 가입할 수 있어요.`);
+  const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+  if (!PHONE_RE.test(digits)) throw badRequest('휴대폰 번호를 정확히 입력해 주세요.');
+  return { name: realName, birthDate: birth, phone: digits };
+}
+
+export const maskPhone = (phone) => (phone ? `${phone.slice(0, 3)}-****-${phone.slice(-4)}` : null);
 
 export const orgDomainOf = (email) => {
   const domain = email.split('@')[1]?.toLowerCase();
   return domain && !PUBLIC_EMAIL_DOMAINS.has(domain) ? domain : null;
 };
 
-export function createUserService(db, { secret, mailer, exposeDevCode = false }) {
+export function createUserService(db, { secret, mailer, sms, exposeDevCode = false }) {
   const stmt = {
     byId: db.prepare('SELECT * FROM users WHERE id = ?'),
     completedRides: db.prepare(`
@@ -30,6 +63,17 @@ export function createUserService(db, { secret, mailer, exposeDevCode = false })
     bumpAttempts: db.prepare('UPDATE email_verifications SET attempts = attempts + 1 WHERE user_id = ?'),
     deleteVerification: db.prepare('DELETE FROM email_verifications WHERE user_id = ?'),
     markVerified: db.prepare('UPDATE users SET email_verified = 1, org_domain = ? WHERE id = ?'),
+    setIdentity: db.prepare('UPDATE users SET real_name = ?, birth_date = ?, phone = ? WHERE id = ?'),
+    phoneTaken: db.prepare('SELECT id FROM users WHERE phone = ? AND phone_verified = 1 AND id != ?'),
+    getPhoneVerification: db.prepare('SELECT * FROM phone_verifications WHERE user_id = ?'),
+    putPhoneVerification: db.prepare(`INSERT OR REPLACE INTO phone_verifications (user_id, phone, code_hash, expires_at, attempts, sent_at)
+      VALUES (?, ?, ?, ?, 0, ?)`),
+    bumpPhoneAttempts: db.prepare('UPDATE phone_verifications SET attempts = attempts + 1 WHERE user_id = ?'),
+    deletePhoneVerification: db.prepare('DELETE FROM phone_verifications WHERE user_id = ?'),
+    markPhoneVerified: db.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?'),
+    smsCount: db.prepare('SELECT COUNT(*) AS n FROM sms_sends WHERE phone = ? AND sent_at > ?'),
+    smsCountByUser: db.prepare('SELECT COUNT(*) AS n FROM sms_sends WHERE user_id = ? AND sent_at > ?'),
+    logSms: db.prepare('INSERT INTO sms_sends (phone, user_id, sent_at) VALUES (?, ?, ?)'),
     blockedEitherWay: db.prepare(`
       SELECT blocked_id AS id FROM blocks WHERE blocker_id = ?
       UNION SELECT blocker_id AS id FROM blocks WHERE blocked_id = ?`),
@@ -45,7 +89,8 @@ export function createUserService(db, { secret, mailer, exposeDevCode = false })
     myRatings: db.prepare('SELECT ratee_id AS userId, good FROM ratings WHERE ride_id = ? AND rater_id = ?'),
   };
 
-  const hashCode = (userId, code) => createHash('sha256').update(`${secret}:${userId}:${code}`).digest('hex');
+  const hashCode = (userId, code, kind = 'email') => createHash('sha256').update(`${secret}:${kind}:${userId}:${code}`).digest('hex');
+  const newCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
 
   function load(userId) {
     const user = stmt.byId.get(userId);
@@ -74,23 +119,89 @@ export function createUserService(db, { secret, mailer, exposeDevCode = false })
       const u = load(userId);
       return {
         id: u.id, email: u.email, nickname: u.nickname, gender: u.gender,
-        verified: Boolean(u.email_verified), org: u.org_domain, stats: stats(u.id),
+        name: u.real_name, birthDate: u.birth_date, phone: maskPhone(u.phone),
+        identityComplete: Boolean(u.real_name && u.birth_date && u.phone),
+        // verified: 휴대폰 본인 확인 완료 (합승 이용 조건)
+        verified: Boolean(u.phone_verified),
+        emailVerified: Boolean(u.email_verified),
+        // 학교/회사 메일이면 소속 인증 가능
+        orgCandidate: orgDomainOf(u.email),
+        org: u.org_domain, stats: stats(u.id),
       };
     },
 
-    /** 다른 사용자에게 보여주는 정보 (이메일 제외) */
+    /** 다른 사용자에게 보여주는 정보 (실명·생년월일·연락처 제외) */
     profile(userId) {
       const u = load(userId);
-      return { id: u.id, nickname: u.nickname, verified: Boolean(u.email_verified), org: u.org_domain, stats: stats(u.id) };
+      return {
+        id: u.id, nickname: u.nickname, gender: u.gender,
+        verified: Boolean(u.phone_verified), org: u.org_domain, stats: stats(u.id),
+      };
     },
 
     requireVerified(userId) {
-      if (!load(userId).email_verified) throw forbidden('이메일 인증 후 이용할 수 있어요.');
+      if (!load(userId).phone_verified) throw forbidden('휴대폰 본인 확인 후 이용할 수 있어요.');
+    },
+
+    /** 본인정보 입력/수정 (휴대폰 인증 전까지만) */
+    setIdentity(userId, input) {
+      const user = load(userId);
+      if (user.phone_verified) throw conflict('본인 확인이 끝난 정보는 바꿀 수 없어요.');
+      const identity = normalizeIdentity(input);
+      if (stmt.phoneTaken.get(identity.phone, userId)) throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
+      // 이전 인증번호는 번호가 달라지면 verifyPhone 에서 무효 처리된다 (재발송 대기시간은 계정 기준으로 유지)
+      stmt.setIdentity.run(identity.name, identity.birthDate, identity.phone, userId);
+      return service.me(userId);
+    },
+
+    async sendPhoneCode(userId) {
+      const user = load(userId);
+      if (user.phone_verified) throw conflict('이미 본인 확인이 완료되었습니다.');
+      if (!user.phone) throw badRequest('먼저 본인정보를 입력해 주세요.');
+      if (stmt.phoneTaken.get(user.phone, userId)) throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
+      const prev = stmt.getPhoneVerification.get(userId);
+      const now = Date.now();
+      if (prev && now - new Date(prev.sent_at).getTime() < RESEND_COOLDOWN_MS) {
+        throw new HttpError(429, '잠시 후 다시 요청해 주세요.');
+      }
+      const dayAgo = new Date(now - 24 * 3600 * 1000).toISOString();
+      if (stmt.smsCount.get(user.phone, dayAgo).n >= MAX_SMS_PER_DAY
+        || stmt.smsCountByUser.get(userId, dayAgo).n >= MAX_SMS_PER_USER_DAY) {
+        throw new HttpError(429, '오늘 인증문자 발송 횟수를 초과했어요. 내일 다시 시도해 주세요.');
+      }
+      const code = newCode();
+      stmt.putPhoneVerification.run(userId, user.phone, hashCode(userId, code, 'phone'),
+        new Date(now + CODE_TTL_MS).toISOString(), new Date(now).toISOString());
+      stmt.logSms.run(user.phone, userId, new Date(now).toISOString());
+      await sms.send(user.phone, `[MEET] 인증번호 ${code} (10분 안에 입력해 주세요)`);
+      return exposeDevCode && !sms.configured ? { devCode: code } : {};
+    },
+
+    verifyPhone(userId, code) {
+      const user = load(userId);
+      if (user.phone_verified) return service.me(userId);
+      const v = stmt.getPhoneVerification.get(userId);
+      if (!v || v.phone !== user.phone || new Date(v.expires_at).getTime() < Date.now()) {
+        throw badRequest('인증번호가 만료되었어요. 다시 받아 주세요.');
+      }
+      if (v.attempts >= MAX_ATTEMPTS) throw badRequest('시도 횟수를 초과했어요. 인증번호를 다시 받아 주세요.');
+      if (typeof code !== 'string' || hashCode(userId, code.trim(), 'phone') !== v.code_hash) {
+        stmt.bumpPhoneAttempts.run(userId);
+        throw badRequest('인증번호가 올바르지 않습니다.');
+      }
+      stmt.deletePhoneVerification.run(userId);
+      try {
+        stmt.markPhoneVerified.run(userId);
+      } catch {
+        // 동시에 같은 번호로 인증한 다른 계정이 있는 경우 (유니크 인덱스)
+        throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
+      }
+      return service.me(userId);
     },
 
     async sendVerificationCode(userId) {
       const user = load(userId);
-      if (user.email_verified) throw conflict('이미 인증이 완료되었습니다.');
+      if (user.email_verified) throw conflict('이미 이메일 인증이 완료되었습니다.');
       const prev = stmt.getVerification.get(userId);
       if (prev && Date.now() - new Date(prev.sent_at).getTime() < RESEND_COOLDOWN_MS) {
         throw new HttpError(429, '잠시 후 다시 요청해 주세요.');

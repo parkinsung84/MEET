@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { identity } from './helpers.js';
 
 // 서울역 → 강남역 (직선 경로의 중간 지점은 '가는 길 하차' 매칭 대상)
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
@@ -33,17 +34,23 @@ async function api(method, path, { token, body } = {}) {
 }
 
 let seq = 0;
-async function signup({ gender = 'male', domain = 'test.com', verify = true } = {}) {
+/** 가입 → 휴대폰 인증 (+ 학교/회사 메일이면 소속 인증까지) */
+async function signup({ gender = 'male', domain = 'test.com', verify = true, verifyEmail = true } = {}) {
   seq += 1;
   const res = await api('POST', '/auth/register', {
-    body: { email: `flow${seq}@${domain}`, password: 'password123', nickname: `사용자${seq}`, gender },
+    body: { email: `flow${seq}@${domain}`, password: 'password123', nickname: `사용자${seq}`, gender, ...identity() },
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   const { token, devCode } = res.body;
   if (!verify) return { token, user: res.body.user, devCode };
-  const verified = await api('POST', '/auth/verify', { token, body: { code: devCode } });
+  const verified = await api('POST', '/auth/phone/verify', { token, body: { code: devCode } });
   assert.equal(verified.status, 200, JSON.stringify(verified.body));
-  return { token, user: verified.body.user };
+  let { user } = verified.body;
+  if (verifyEmail && user.orgCandidate) {
+    const sent = await api('POST', '/auth/email/send', { token });
+    ({ user } = (await api('POST', '/auth/email/verify', { token, body: { code: sent.body.devCode } })).body);
+  }
+  return { token, user };
 }
 
 async function createRide(host, overrides = {}) {
@@ -67,32 +74,93 @@ before(async () => {
 });
 after(() => new Promise((resolve) => server.close(resolve)));
 
-describe('이메일 인증', () => {
-  test('인증 전에는 합승을 만들거나 참여할 수 없다', async () => {
+describe('본인정보·휴대폰 인증', () => {
+  const register = (body) => api('POST', '/auth/register', {
+    body: { email: `id${++seq}@test.com`, password: 'password123', nickname: '테스트', gender: 'female', ...body },
+  });
+
+  test('휴대폰 인증 전에는 합승을 만들거나 참여할 수 없다', async () => {
     const user = await signup({ verify: false });
     assert.equal(user.user.verified, false);
+    assert.equal(user.user.identityComplete, true);
     const res = await api('POST', '/rides', {
       token: user.token,
       body: { origin: SEOUL_STN, destination: GANGNAM, departAt: inMinutes(60) },
     });
     assert.equal(res.status, 403);
+    assert.match(res.body.error, /휴대폰/);
+  });
+
+  test('가입 시 본인정보 검증: 이름·생년월일·휴대폰·만 19세 이상', async () => {
+    const adult = new Date();
+    adult.setFullYear(adult.getFullYear() - 19);
+    const minor = new Date(adult.getTime() + 2 * 86400000);
+    const ymd = (d) => d.toISOString().slice(0, 10);
+    assert.equal((await register(identity({ name: '김' }))).status, 400);
+    assert.equal((await register(identity({ name: '홍길동1' }))).status, 400);
+    assert.equal((await register(identity({ birthDate: '1995-02-30' }))).status, 400);
+    assert.equal((await register(identity({ phone: '02-123-4567' }))).status, 400);
+    const underage = await register(identity({ birthDate: ymd(minor) }));
+    assert.equal(underage.status, 400);
+    assert.match(underage.body.error, /만 19세/);
+    assert.equal((await register(identity({ birthDate: ymd(new Date(adult.getTime() - 86400000)) }))).status, 201);
+  });
+
+  test('인증된 휴대폰 번호로는 다른 계정을 만들 수 없다', async () => {
+    const info = identity();
+    const first = await register(info);
+    await api('POST', '/auth/phone/verify', { token: first.body.token, body: { code: first.body.devCode } });
+    const dup = await register({ ...info, phone: info.phone.replace(/-/g, '') });
+    assert.equal(dup.status, 409);
   });
 
   test('잘못된 코드 5회 초과 시 재발급 필요, 재발송은 1분 쿨다운', async () => {
     const user = await signup({ verify: false });
     for (let i = 0; i < 5; i++) {
-      assert.equal((await api('POST', '/auth/verify', { token: user.token, body: { code: '000000x' } })).status, 400);
+      assert.equal((await api('POST', '/auth/phone/verify', { token: user.token, body: { code: '000000x' } })).status, 400);
     }
-    const blocked = await api('POST', '/auth/verify', { token: user.token, body: { code: user.devCode } });
+    const blocked = await api('POST', '/auth/phone/verify', { token: user.token, body: { code: user.devCode } });
     assert.equal(blocked.status, 400);
     assert.match(blocked.body.error, /시도 횟수/);
-    assert.equal((await api('POST', '/auth/verify/send', { token: user.token })).status, 429);
+    assert.equal((await api('POST', '/auth/phone/send', { token: user.token })).status, 429);
   });
 
-  test('학교/회사 메일은 소속으로 인정, 공용 메일은 아님', async () => {
+  test('기존 가입자는 본인정보를 입력하고 인증, 인증 후에는 수정 불가', async () => {
+    const user = await signup({ verify: false });
+    // 번호를 바꿔도 계정 기준 재발송 대기시간은 그대로 (번호 바꿔가며 문자 폭탄 방지)
+    const set = await api('PUT', '/auth/identity', { token: user.token, body: identity({ name: '김철수' }) });
+    assert.equal(set.status, 429);
+    assert.equal((await api('GET', '/auth/me', { token: user.token })).body.user.name, '김철수', '정보 저장은 됨');
+    // 이전 번호로 받은 인증번호는 새 번호에 쓸 수 없음
+    const stale = await api('POST', '/auth/phone/verify', { token: user.token, body: { code: user.devCode } });
+    assert.equal(stale.status, 400);
+    const other = await signup({ verify: false });
+    const updated = await api('PUT', '/auth/identity', { token: other.token, body: { name: 'x' } });
+    assert.equal(updated.status, 400);
+    const done = await api('POST', '/auth/phone/verify', { token: other.token, body: { code: other.devCode } });
+    assert.equal(done.body.user.verified, true);
+    assert.equal((await api('PUT', '/auth/identity', { token: other.token, body: identity() })).status, 409);
+  });
+
+  test('본인정보는 본인에게만: 다른 사용자에게는 닉네임·성별만', async () => {
+    const me = await signup({ gender: 'female' });
+    const mine = (await api('GET', '/auth/me', { token: me.token })).body.user;
+    assert.equal(mine.name, '홍길동');
+    assert.match(mine.phone, /^010-\*\*\*\*-\d{4}$/, '내 번호도 가려서 보여줌');
+    const viewer = await signup();
+    const { user } = (await api('GET', `/users/${me.user.id}`, { token: viewer.token })).body;
+    assert.equal(user.gender, 'female');
+    for (const key of ['name', 'phone', 'birthDate', 'email']) assert.equal(user[key], undefined, key);
+  });
+
+  test('학교/회사 메일은 이메일 인증 시 소속으로 인정, 공용 메일은 아님', async () => {
     const student = await signup({ domain: 'snu.ac.kr' });
     assert.equal(student.user.org, 'snu.ac.kr');
+    const notYet = await signup({ domain: 'yonsei.ac.kr', verifyEmail: false });
+    assert.equal(notYet.user.org, null);
+    assert.equal(notYet.user.orgCandidate, 'yonsei.ac.kr');
     const gmail = await signup({ domain: 'gmail.com' });
+    assert.equal(gmail.user.orgCandidate, null);
     assert.equal(gmail.user.org, null);
   });
 });

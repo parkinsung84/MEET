@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { io as connect } from 'socket.io-client';
 import { createApp } from '../src/app.js';
+import { identity } from './helpers.js';
 
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
 const GANGNAM = { name: '강남역', lat: 37.4979, lng: 127.0276 };
@@ -22,10 +23,10 @@ let seq = 0;
 async function signup({ gender = 'male', verify = true } = {}) {
   seq += 1;
   const res = await api('POST', '/auth/register', {
-    body: { email: `inq${seq}@test.com`, password: 'password123', nickname: `문의${seq}`, gender },
+    body: { email: `inq${seq}@test.com`, password: 'password123', nickname: `문의${seq}`, gender, ...identity() },
   });
   const { token, devCode } = res.body;
-  if (verify) await api('POST', '/auth/verify', { token, body: { code: devCode } });
+  if (verify) await api('POST', '/auth/phone/verify', { token, body: { code: devCode } });
   return { token, user: (await api('GET', '/auth/me', { token })).body.user };
 }
 

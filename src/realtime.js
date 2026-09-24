@@ -12,7 +12,7 @@ const room = (rideId) => `ride:${rideId}`;
  *                     inquiry:message(message) — 문의자 본인과 방을 보고 있는 멤버에게
  * 연결되면 개인 room(user:<id>)에 들어가 알림을 받는다.
  */
-export function attachRealtime(io, rides, secret) {
+export function attachRealtime(io, rides, secret, { calls = null } = {}) {
   io.use((socket, next) => {
     const userId = verifyToken(socket.handshake.auth?.token ?? '', secret);
     if (!userId) return next(new Error('unauthorized'));
@@ -31,6 +31,7 @@ export function attachRealtime(io, rides, secret) {
   io.on('connection', (socket) => {
     const { userId } = socket.data;
     socket.join(`user:${userId}`);
+    calls?.register(socket);
 
     socket.on('ride:subscribe', handle((rideId) => {
       if (!rides.isMember(rideId, userId)) throw new HttpError(403, '합승 멤버만 입장할 수 있습니다.');

@@ -6,7 +6,7 @@
 ## 합승 흐름
 
 ```
-찾기 ──▶ 문의 ──▶ 참여 ──▶ 만나기 ──▶ 출발 ──▶ 정산 ──▶ 평가
+가입(본인정보·휴대폰 인증) ──▶ 찾기 ──▶ 문의 ──▶ 참여 ──▶ 만나기(📞 통화) ──▶ 출발 ──▶ 정산 ──▶ 평가
 ```
 
 | 단계 | 기능 |
@@ -21,9 +21,12 @@
 | **평가** | 도착 완료 후 동승자 👍/👎. 평가 3건 이상부터 매너 점수 공개, 노쇼·직전취소 횟수와 함께 모든 카드에 표시 |
 
 ### 신뢰·안전
-- **이메일 인증 필수**: 인증해야 방 만들기/참여/알림 등록 가능. 인증번호 10분 만료, 5회 실패 시 재발급, 재발송 1분 제한
-- **학교·회사 소속 인증**: `@snu.ac.kr` 같은 기관 메일로 인증하면 소속이 표시되고, **같은 소속끼리만 타는 합승**을 만들 수 있음 (gmail·naver 등 공용 메일 제외)
-- **차단 / 신고**: 차단하면 서로의 방이 보이지 않고 같은 방에 참여 불가. 신고는 `reports` 테이블에 쌓임
+- **가입 시 본인정보 필수**: 실명, 생년월일, 성별, 휴대폰 번호. **만 19세 이상**만 가입 가능 (`src/users.js` 의 `MIN_AGE`)
+- **휴대폰 문자 인증 필수**: 인증해야 방 만들기/참여/문의/알림 등록 가능. **인증된 번호 하나당 계정 하나** (재가입으로 노쇼·신고 기록 세탁 방지). 인증번호 10분 만료, 5회 실패 시 재발급, 재발송 1분 대기, 하루 발송 한도(번호별 5회·계정별 10회)
+- **본인정보 비공개**: 실명·생년월일·휴대폰 번호는 본인에게만 보이고(번호도 가려서 표시), 동승자에게는 **닉네임·성별**만 공개
+- **성별 표시**: 합승 카드의 방장, 탑승자 목록, 참여 문의, 통화 화면에 성별 표시
+- **학교·회사 소속 인증 (선택)**: `@snu.ac.kr` 같은 기관 메일이면 내 정보에서 이메일 인증 → 소속 표시 + **같은 소속끼리만 타는 합승** (gmail·naver 등 공용 메일 제외)
+- **차단 / 신고**: 차단하면 서로의 방이 보이지 않고 같은 방 참여·통화 불가. 신고는 `reports` 테이블에 쌓임
 - 참여 전 문의는 **참여 조건(성별·소속·차단)을 만족하는 인증 사용자만** 가능하고, 답장을 받기 전에는 연속 5개까지만 보낼 수 있음 (도배 방지). 대화는 문의자와 방 멤버만 볼 수 있음
 - 만남 장소·하차 지점·정산 계좌는 **멤버에게만** 공개. 나가거나 노쇼 처리되면 실시간 채널에서도 즉시 제외
 
@@ -31,6 +34,14 @@
 하차 지점마다 경로를 구간으로 나누고, 각 구간 요금은 그 구간에 타고 있던 사람끼리 똑같이 나눕니다.
 예) 12,000원, A·B는 끝까지, C는 절반 지점에서 하차 → 앞 절반 6,000원 ÷ 3 + 뒤 절반 6,000원 ÷ 2 → **A 5,000 · B 5,000 · C 2,000원**.
 모두 같은 곳에서 내리면 1/N과 같습니다.
+
+### 탑승자끼리 음성 통화 📞
+전화번호를 주고받지 않고 앱 안에서 통화합니다 (WebRTC — 보이스톡처럼 인터넷으로 연결).
+- 탑승자 목록의 **📞 통화** → 상대방 모든 기기에서 벨(소리·진동) → 받기/거절. 앱이 꺼져 있으면 푸시로 알림
+- 같은 합승의 멤버끼리, **모집 중·이동 중**일 때만 가능. 차단 관계면 불가, 통화 중이면 "상대방이 통화 중"
+- 30초 안 받으면 **부재중 통화** 알림, 음소거, 통화 시간 표시, 한 기기에서 받으면 다른 기기 벨은 멈춤
+- 음성은 브라우저끼리 직접 오가고 서버는 연결 협상 메시지만 중계 (녹음·저장 없음)
+- **HTTPS 필수** (마이크 권한). 모바일 데이터망 등 일부 환경에서는 **TURN 서버**가 있어야 연결됩니다 — 아래 환경변수 참고
 
 ### 알림
 참여 문의/답장·참여·나감·방장 위임·만남 장소 변경·도착 체크인·출발 10분 전·출발·노쇼·정산 요청/송금/완료·도착 완료·경로 알림·채팅.
@@ -58,12 +69,15 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `DB_PATH` | SQLite 파일 경로 (기본 `meet.db`) |
 | `JWT_SECRET` | 토큰 서명 키. 운영 환경에서는 반드시 설정 |
 | `NODE_ENV` | `production` 이면 개발용 인증번호 화면 노출이 꺼짐 (운영 필수) |
-| `SMTP_URL` / `MAIL_FROM` | 인증 메일 발송용 SMTP. **없으면 인증번호를 서버 콘솔에 출력**하고, 개발 모드에서는 화면에도 보여줌 |
+| `NCP_ACCESS_KEY` / `NCP_SECRET_KEY` / `NCP_SENS_SERVICE_ID` / `SMS_FROM` | 휴대폰 인증문자 발송 (네이버 클라우드 SENS). **없으면 인증번호를 서버 콘솔에 출력**하고, 개발 모드에서는 화면에도 보여줌 |
+| `SMTP_URL` / `MAIL_FROM` | 소속(학교·회사) 인증 메일 발송용 SMTP. 없으면 콘솔 출력 |
+| `TURN_URLS` + `TURN_SECRET` (또는 `TURN_USERNAME`/`TURN_CREDENTIAL`) | 음성 통화 중계(TURN) 서버. `TURN_SECRET` 이면 coturn `use-auth-secret` 방식으로 사용자별 1시간 임시 계정 발급 |
+| `STUN_URLS` | STUN 서버 (기본 `stun:stun.l.google.com:19302`) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | 웹 푸시 키. 비우면 최초 실행 시 자동 생성해 DB에 저장 |
 | `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` | 네이버 클라우드 Maps Client ID / Client Secret (선택) |
 | `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | 네이버 개발자센터 검색 API Client ID / Secret (선택) |
 
-> ⚠️ 운영 배포 시: `NODE_ENV=production`, `JWT_SECRET`, `SMTP_URL` 을 반드시 설정하세요. 웹 푸시와 위치 기능은 **HTTPS** 에서만 동작합니다 (localhost 제외).
+> ⚠️ 운영 배포 시: `NODE_ENV=production`, `JWT_SECRET`, SENS 문자 설정을 반드시 하세요 (없으면 아무도 가입을 마칠 수 없음). 웹 푸시·위치·음성 통화는 **HTTPS** 에서만 동작합니다 (localhost 제외). 음성 통화를 안정적으로 쓰려면 TURN 서버(coturn 직접 운영 또는 유료 서비스)가 필요합니다.
 
 네이버 키가 없어도 앱은 동작합니다. 이때는 주요 거점 18곳만 검색되고, 지도는 숨겨지며, 요금은 직선거리로 추정합니다.
 
@@ -94,7 +108,9 @@ src/
   app.js            서비스 조립, Express/Socket.IO 구성
   db.js             SQLite 스키마 + 기존 DB 자동 마이그레이션
   auth.js           비밀번호 해시, JWT, 인증 미들웨어
-  users.js          이메일/소속 인증, 매너 지표, 평가, 차단, 신고
+  users.js          본인정보·휴대폰 인증, 소속 이메일 인증, 매너 지표, 평가, 차단, 신고
+  sms.js            인증문자 발송 (네이버 클라우드 SENS / 개발용 콘솔)
+  calls.js          탑승자 음성 통화 신호 중계 (WebRTC), TURN 임시 계정
   rides.js          합승 도메인: 검색·매칭, 참여/나가기, 체크인, 노쇼, 정산, 주기 작업
   alerts.js         경로 알림 (조건 맞는 새 합승방 알림)
   inquiries.js      참여 전 문의 (문의자별 1:1 대화, 멤버 누구나 답장)
@@ -111,6 +127,7 @@ public/             모바일 웹앱 (빌드 과정 없는 Vanilla JS, PWA)
   components.js     장소 선택기, 합승 카드, 매너 칩
   screens/          홈(검색), 방 만들기, 합승 상세, 인증, 내 합승·알림·내 정보
   push.js / sw.js   웹 푸시 구독 / 서비스워커
+  call.js           음성 통화 (마이크, WebRTC 연결, 벨소리, 통화 화면)
   maps.js           네이버 지도 (선택)
 test/               node:test 기반 테스트 (API·흐름·네이버 연동·실시간)
 ```
@@ -121,10 +138,12 @@ test/               node:test 기반 테스트 (API·흐름·네이버 연동·�
 
 | Method | Path | 설명 |
 | --- | --- | --- |
-| POST | `/api/auth/register` | `{ email, password, nickname, gender }` → 인증번호 발송 |
+| POST | `/api/auth/register` | `{ email, password, nickname, gender, name, birthDate, phone }` → 인증문자 발송 |
 | POST | `/api/auth/login` | `{ email, password }` → `{ token, user }` |
-| GET | `/api/auth/me` | 내 정보 (인증·소속·매너 지표) |
-| POST | `/api/auth/verify/send` · `/api/auth/verify` | 인증번호 재발송 / `{ code }` 인증 |
+| GET | `/api/auth/me` | 내 정보 (본인정보·인증·소속·매너 지표) |
+| PUT | `/api/auth/identity` | 본인정보 입력/수정 `{ name, birthDate, phone }` (휴대폰 인증 전까지) → 인증문자 발송 |
+| POST | `/api/auth/phone/send` · `/api/auth/phone/verify` | 인증문자 재발송 / `{ code }` 휴대폰 인증 |
+| POST | `/api/auth/email/send` · `/api/auth/email/verify` | 학교·회사 소속 이메일 인증 (선택) |
 | GET | `/api/config` | 공개 설정 (`naverMapKeyId`, `vapidPublicKey`) |
 | GET | `/api/rides?originLat&originLng&destLat&destLng&radiusKm&from&to` | 합승 검색 (시간 범위, 가는 길 매칭) |
 | GET | `/api/rides/mine` | 내 합승 |
@@ -150,12 +169,14 @@ test/               node:test 기반 테스트 (API·흐름·네이버 연동·�
 | GET | `/api/places/search?q=` · `/api/places/reverse?lat&lng` | 장소 검색 / 좌표 → 주소 |
 
 Socket.IO (`auth: { token }` 로 연결): `ride:subscribe(rideId, ack)`, `chat:send({ rideId, body }, ack)` →
-`inquiry:subscribe(rideId, ack)` (문의자) →
-서버 이벤트 `chat:message`, `inquiry:message`, `ride:updated`, `rides:changed`, `notification`.
+`inquiry:subscribe(rideId, ack)` (문의자),
+음성 통화 `call:invite({ rideId, to }, ack)`, `call:accept({ callId }, ack)`, `call:decline`, `call:signal({ callId, data })`, `call:end` →
+서버 이벤트 `chat:message`, `inquiry:message`, `ride:updated`, `rides:changed`, `notification`,
+`call:incoming`, `call:accepted`, `call:signal`, `call:ended`.
 
 ## 아직 남은 것 (로드맵)
 
-- **본인인증**: 성별은 아직 본인 선택값이라 "동성만" 조건을 완전히 믿을 수 없음 → PASS 휴대폰 본인인증(유료) 연동 필요
+- **통신사 본인인증**: 지금의 문자 인증은 "그 번호를 가진 사람"까지만 확인하고, 실명·생년월일·성별은 본인이 입력한 값 → "동성만" 조건을 완전히 믿으려면 PASS 본인인증(포트원 등, 건당 유료)으로 이 정보를 통신사에서 받아와야 함
 - **신고 처리 도구**: 신고는 저장만 됨 → 관리자 화면, 반복 노쇼·신고 사용자 이용 제한
 - **간편 송금**: 지금은 계좌 복사 → 토스/카카오페이 송금 링크 연동
 - **이용 제한**: 검색·장소 API 사용자별 호출 제한(rate limit)

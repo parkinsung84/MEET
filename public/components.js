@@ -104,11 +104,19 @@ export function placePicker(label, { allowCurrent = false } = {}) {
 export const routeSummary = (fare) =>
   `약 ${fare.distanceKm}km${fare.durationMin ? ` · ${fare.durationMin}분` : ''}`;
 
-/** 매너 지표 칩: 인증, 매너 점수, 노쇼 이력 */
+/** 성별 칩 — 합승에서는 동승자의 성별을 항상 보여준다 */
+export function genderChip(gender) {
+  if (!gender) return null;
+  return h('span', { class: `chip gender ${gender}` }, gender === 'female' ? '👩 여성' : '👨 남성');
+}
+
+/** 매너 지표 칩: 성별, 본인 확인, 소속, 매너 점수, 노쇼 이력 */
 export function trustChips(user) {
   const { stats } = user;
   return [
-    user.verified && h('span', { class: 'chip ok', title: '이메일 인증' }, user.org ? `🎓 ${user.org}` : '✔ 인증'),
+    genderChip(user.gender),
+    user.verified && h('span', { class: 'chip ok', title: '휴대폰 본인 확인 완료' }, '✔ 본인확인'),
+    user.org && h('span', { class: 'chip ok', title: '학교/회사 이메일 인증' }, `🎓 ${user.org}`),
     stats.mannerPercent !== null
       ? h('span', { class: 'chip', title: `평가 ${stats.ratings}건` }, `👍 ${stats.mannerPercent}%`)
       : h('span', { class: 'chip', title: '평가가 3건 이상이면 매너 점수가 표시돼요' }, `🆕 합승 ${stats.completedRides}회`),

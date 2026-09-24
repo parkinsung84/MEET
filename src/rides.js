@@ -216,7 +216,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     const result = {
       id: ride.id,
       hostId: ride.host_id,
-      host: { nickname: host.nickname, verified: host.verified, stats: host.stats },
+      host: { nickname: host.nickname, gender: host.gender, verified: host.verified, org: host.org, stats: host.stats },
       origin: { name: ride.origin_name, lat: ride.origin_lat, lng: ride.origin_lng },
       destination: { name: ride.dest_name, lat: ride.dest_lat, lng: ride.dest_lng },
       departAt: ride.depart_at,
@@ -238,6 +238,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
       return {
         id: m.id,
         nickname: m.nickname,
+        gender: profile.gender,
         verified: profile.verified,
         org: profile.org,
         stats: profile.stats,
@@ -555,7 +556,7 @@ export function createRideService(db, { findRoute = null, users, notifier, log =
     canJoin(rideId, userId) {
       const ride = loadRide(rideId);
       const user = stmt.userById.get(userId);
-      return Boolean(user?.email_verified) && !stmt.member.get(ride.id, userId) && !eligibility(ride, user);
+      return Boolean(user?.phone_verified) && !stmt.member.get(ride.id, userId) && !eligibility(ride, user);
     },
 
     /** 참여할 수 없는 사유 (성별·소속·차단), 가능하면 null */

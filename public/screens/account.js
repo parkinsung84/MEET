@@ -91,26 +91,61 @@ function blockedCard() {
   return box;
 }
 
+/** 학교·회사 이메일 인증 (선택) — 같은 소속 전용 합승 */
+function orgCard(user) {
+  if (user.org || !user.orgCandidate) return null;
+  const input = h('input', { inputmode: 'numeric', maxlength: 6, placeholder: '인증번호 6자리', 'aria-label': '이메일 인증번호' });
+  const dev = h('p', { class: 'muted dev-note', hidden: true });
+  return h('div', { class: 'card stack' },
+    h('h2', {}, '🎓 소속 인증'),
+    h('p', { class: 'muted' }, `${user.email} 로 인증하면 @${user.orgCandidate} 사람들끼리만 타는 합승을 만들 수 있어요.`),
+    h('button', {
+      class: 'secondary',
+      onclick: async () => {
+        try {
+          const { devCode } = await api('POST', '/auth/email/send');
+          if (devCode) Object.assign(dev, { hidden: false, textContent: `개발 모드 인증번호: ${devCode}` });
+          toast('인증 메일을 보냈어요.');
+        } catch (err) { toast(err.message); }
+      },
+    }, '인증 메일 받기'),
+    dev,
+    h('div', { class: 'row' }, input, h('button', {
+      class: 'fit',
+      onclick: async () => {
+        try {
+          await api('POST', '/auth/email/verify', { code: input.value });
+          await refreshMe();
+          toast(`🎓 ${state.user.org} 소속으로 인증되었어요!`);
+          location.reload();
+        } catch (err) { toast(err.message); }
+      },
+    }, '인증')));
+}
+
 export function profileScreen() {
   const root = h('div', {}, h('h1', {}, '내 정보'));
   refreshMe().then((user) => {
     const s = user.stats;
-    root.append(
+    // h() 로 감싸 null 카드(소속 인증 불필요 등)를 걸러낸다
+    root.append(h('div', {},
       h('div', { class: 'card stack' },
         h('div', { class: 'route' }, user.nickname),
         h('div', { class: 'muted' }, user.email),
         h('div', { class: 'chips' }, trustChips(user)),
-        !user.verified && h('a', { class: 'btn', href: '#/verify' }, '이메일 인증하기'),
+        user.identityComplete && h('div', { class: 'muted' }, `${user.name} · ${user.birthDate} · ${user.phone} (나만 보여요)`),
+        !user.verified && h('a', { class: 'btn', href: '#/verify' }, '휴대폰 본인 확인하기'),
         h('div', { class: 'fare' },
           h('div', {}, h('span', { class: 'muted' }, '완료한 합승'), h('strong', {}, `${s.completedRides}회`)),
           h('div', {}, h('span', { class: 'muted' }, '매너 점수'), h('strong', {}, s.mannerPercent === null ? '-' : `${s.mannerPercent}%`)),
           h('div', {}, h('span', { class: 'muted' }, '노쇼 / 직전취소'), h('strong', {}, `${s.noShows} / ${s.lateCancels}`))),
         h('p', { class: 'muted' }, '매너 점수와 노쇼 기록은 다른 사용자에게 공개돼요.')),
+      orgCard(user),
       pushCard(),
       alertsCard(),
       blockedCard(),
       h('button', { class: 'secondary wide', onclick: logout }, '로그아웃'),
-    );
+    ));
   }).catch((err) => toast(err.message));
   return root;
 }

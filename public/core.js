@@ -70,6 +70,7 @@ export function connectSocket() {
   state.socket = window.io({ auth: { token: state.token } });
   state.socket.on('rides:changed', () => window.dispatchEvent(new Event('rides:changed')));
   state.socket.on('notification', (n) => window.dispatchEvent(new CustomEvent('notification', { detail: n })));
+  window.dispatchEvent(new CustomEvent('socket:ready', { detail: state.socket }));
 }
 
 export const emit = (event, payload) => new Promise((resolve) => state.socket.emit(event, payload, resolve));

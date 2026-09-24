@@ -129,7 +129,7 @@ export function homeScreen() {
 
   return h('div', {},
     !state.user.verified && h('a', { class: 'card banner warn', href: '#/verify' },
-      h('strong', {}, '📧 이메일 인증이 필요해요'), h('div', {}, '인증을 마치면 합승을 만들고 참여할 수 있어요.')),
+      h('strong', {}, '📱 휴대폰 본인 확인이 필요해요'), h('div', {}, '확인을 마치면 합승을 만들고 참여할 수 있어요.')),
     upcomingBanner(),
     form,
     list,

@@ -171,3 +171,24 @@ button.link { background: none; color: var(--muted); font-weight: 400; text-deco
 .thread { cursor: pointer; }
 .thread .preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #inquiry-threads h2 { display: flex; align-items: center; gap: 8px; }
+
+/* ---------- 성별 / 가입 ---------- */
+.chip.gender.female { background: #fce7f3; color: #9d174d; border-color: #fbcfe8; }
+.chip.gender.male { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+.gender-pick .check { justify-content: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.card h2 + input, .card h2 + label { margin-top: -4px; }
+
+/* ---------- 음성 통화 ---------- */
+.member-actions { margin-left: auto; display: flex; gap: 6px; }
+button.call { background: #16a34a; color: #fff; }
+.call-overlay {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: rgb(12 10 9 / .92); color: #fff; padding: 24px;
+}
+.call-card { display: grid; justify-items: center; gap: 10px; text-align: center; width: 100%; max-width: 360px; }
+.call-avatar { font-size: 72px; width: 120px; height: 120px; display: grid; place-items: center; border-radius: 50%; background: rgb(255 255 255 / .1); }
+.call-name { font-size: 1.5rem; }
+.call-route, .call-status { color: #d6d3d1; }
+.call-actions { display: flex; gap: 12px; margin-top: 24px; width: 100%; }
+.call-btn { flex: 1; padding: 16px; border-radius: 999px; font-size: 1rem; }
+button.ok { background: #16a34a; color: #fff; }

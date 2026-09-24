@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { identity } from './helpers.js';
 
 /** 테스트용 네이버 클라이언트 대역 */
 const fakeNaver = {
@@ -23,10 +24,10 @@ async function start(options) {
   const res = await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'a@a.com', password: 'password123', nickname: 'a', gender: 'male' }),
+    body: JSON.stringify({ email: 'a@a.com', password: 'password123', nickname: 'a', gender: 'male', ...identity() }),
   });
   const { token, devCode } = await res.json();
-  await fetch(`${base}/auth/verify`, {
+  await fetch(`${base}/auth/phone/verify`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ code: devCode }),

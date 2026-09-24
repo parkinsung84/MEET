@@ -1,4 +1,5 @@
-import { placePicker, routeSummary, trustChips } from '../components.js';
+import { startCall } from '../call.js';
+import { genderChip, placePicker, routeSummary, trustChips } from '../components.js';
 import { api, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, state, STATUS_LABEL, won } from '../core.js';
 import { mapsAvailable, renderRouteMap } from '../maps.js';
 import { ask, copyText, h, sheet, toast } from '../ui.js';
@@ -132,6 +133,7 @@ export function rideScreen(rideId) {
       h('ul', { class: 'members' }, threads.map((t) => h('li', { class: 'thread', onclick: () => openThreadSheet(t) },
         h('div', { class: 'member-name' },
           t.guest.nickname,
+          genderChip(t.guest.gender),
           t.joined && h('span', { class: 'chip ok' }, '참여함'),
           t.awaitingReply && !t.joined && h('span', { class: 'chip hl' }, '답장 대기')),
         h('div', { class: 'muted preview' }, `${t.lastMessage.senderId === t.guest.id ? '' : `${t.lastMessage.nickname}: `}${t.lastMessage.body}`)))));
@@ -274,7 +276,7 @@ export function rideScreen(rideId) {
     if (ride.status === 'cancelled') return h('div', { class: 'card step muted' }, '취소된 합승이에요.');
     if (ride.status === 'open' && !isMember()) {
       const full = ride.memberCount >= ride.maxSeats;
-      if (!state.user.verified) return h('a', { class: 'card step warn', href: '#/verify' }, '📧 이메일 인증 후 참여할 수 있어요.');
+      if (!state.user.verified) return h('a', { class: 'card step warn', href: '#/verify' }, '📱 휴대폰 본인 확인 후 참여할 수 있어요.');
       return h('div', { class: 'card step' },
         h('div', { class: 'row' },
           h('button', { class: 'secondary', onclick: () => { inquiryInput?.focus(); inquiryInput?.scrollIntoView({ block: 'center' }); } }, '💬 먼저 물어보기'),
@@ -330,6 +332,9 @@ export function rideScreen(rideId) {
       '먼저 내리는 사람은 탄 거리만큼만 내요.'));
   }
 
+  // 같은 합승의 탑승자끼리, 모집 중이거나 이동 중일 때 통화 가능
+  const canCall = () => isMember() && (ride.status === 'open' || ride.status === 'departed');
+
   function membersCard() {
     return h('div', { class: 'card' },
       h('h2', {}, `👥 탑승자 ${ride.memberCount}/${ride.maxSeats}`),
@@ -339,7 +344,9 @@ export function rideScreen(rideId) {
           m.id === ride.hostId && h('span', { class: 'chip hl' }, '방장'),
           m.id === me() && h('span', { class: 'muted' }, '(나)'),
           ride.status === 'open' && m.arrived && h('span', { class: 'chip ok' }, '도착'),
-          m.id !== me() && h('button', { class: 'secondary small more', 'aria-label': `${m.nickname} 메뉴`, onclick: () => openMemberMenu(m) }, '⋯')),
+          m.id !== me() && h('span', { class: 'member-actions' },
+            canCall() && h('button', { class: 'small call', 'aria-label': `${m.nickname}에게 음성 통화`, onclick: () => startCall(ride.id, m) }, '📞 통화'),
+            h('button', { class: 'secondary small', 'aria-label': `${m.nickname} 메뉴`, onclick: () => openMemberMenu(m) }, '⋯'))),
         h('div', { class: 'chips' },
           trustChips(m),
           m.dropoff && h('span', { class: 'chip' }, `🛑 ${m.dropoff.name}에서 하차`),

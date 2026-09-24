@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server } from 'socket.io';
 import { createAlertService } from './alerts.js';
+import { createCallService } from './calls.js';
 import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
 import { createInquiryService } from './inquiries.js';
@@ -12,6 +13,7 @@ import { createNotifier } from './notifier.js';
 import { createWebPush } from './push.js';
 import { attachRealtime } from './realtime.js';
 import { createRideService } from './rides.js';
+import { createSmsSender } from './sms.js';
 import { authRouter } from './routes/auth.js';
 import { placesRouter } from './routes/places.js';
 import { ridesRouter } from './routes/rides.js';
@@ -22,22 +24,24 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public', import.meta.url));
 const TICK_MS = 60 * 1000;
 
 /**
- * naver: 네이버 API 클라이언트, mailer: 메일 발송, push: Web Push 발송기 (테스트에서 대역 주입)
- * exposeDevCode: 메일 서버가 없을 때 인증번호를 응답에 포함 (개발용)
+ * naver: 네이버 API 클라이언트, mailer: 메일 발송, sms: 문자 발송, push: Web Push 발송기 (테스트에서 대역 주입)
+ * exposeDevCode: 메일/문자 서비스가 없을 때 인증번호를 응답에 포함 (개발용)
  */
 export function createApp({
   dbPath = ':memory:',
   secret,
   naver = createNaverClient(),
   mailer = createMailer({}, { info() {} }),
+  sms = createSmsSender({}, { log: { info() {} } }),
   push,
   exposeDevCode = true,
+  callRingTimeoutMs,
 }) {
   if (!secret) throw new Error('JWT secret is required');
   const db = openDatabase(dbPath);
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
-  const users = createUserService(db, { secret, mailer, exposeDevCode });
+  const users = createUserService(db, { secret, mailer, sms, exposeDevCode });
   const rides = createRideService(db, {
     users,
     notifier,
@@ -56,7 +60,8 @@ export function createApp({
   const server = createServer(app);
   const io = new Server(server);
   notifier.attach(io);
-  const realtime = attachRealtime(io, rides, secret);
+  const calls = createCallService(io, { rides, users, notifier, ringTimeoutMs: callRingTimeoutMs });
+  const realtime = attachRealtime(io, rides, secret, { calls });
 
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(PUBLIC_DIR));
@@ -92,7 +97,7 @@ export function createApp({
   }
 
   return {
-    app, server, db, io, tick,
+    app, server, db, io, tick, calls,
     startScheduler() {
       const timer = setInterval(() => {
         try { tick(); } catch (err) { console.error('[scheduler]', err); }
