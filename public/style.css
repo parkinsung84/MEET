@@ -120,3 +120,48 @@ button:disabled { opacity: .5; cursor: default; }
   font-size: 34px; pointer-events: none; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .4));
 }
 .picker-foot { display: grid; gap: 6px; padding: 16px; border-top: 1px solid var(--line); }
+
+/* ---------- 공통 보조 ---------- */
+[hidden] { display: none !important; }
+button.wide, .btn.wide { width: 100%; }
+button.link { background: none; color: var(--muted); font-weight: 400; text-decoration: underline; padding: 4px; }
+.check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: .95rem; }
+.check input { width: auto; }
+.chip.ok { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.chip.warn { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.soon { color: var(--danger); }
+.host-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: .8rem; }
+.host-line .chip { font-size: .72rem; }
+.banner { display: grid; gap: 2px; text-decoration: none; border-color: var(--brand); border-width: 2px; }
+.banner.warn { border-color: var(--danger); }
+.dev-note { background: var(--bg); padding: 8px; border-radius: 8px; font-family: monospace; }
+
+/* ---------- 합승 상세 ---------- */
+.step { display: grid; gap: 10px; }
+.step h2 { margin: 0; }
+.meeting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.members li { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.members li:last-child { border-bottom: 0; }
+.member-name { display: flex; align-items: center; gap: 6px; }
+.member-name .more { margin-left: auto; }
+.settle-row { display: flex !important; align-items: center; gap: 8px; }
+.settle-row > span:first-child { flex: 1; }
+.account { background: var(--bg); border-radius: 10px; padding: 8px 10px; font-weight: 600; }
+
+/* ---------- 알림 ---------- */
+.bell { position: relative; }
+.badge {
+  position: absolute; top: -6px; right: -10px; min-width: 18px; padding: 0 4px;
+  background: var(--danger); color: #fff; border-radius: 999px; font-size: .7rem; line-height: 18px; text-align: center;
+}
+.notification { display: grid; gap: 2px; text-decoration: none; }
+.notification.unread { border-left: 4px solid var(--brand); }
+
+/* ---------- 하단 시트 ---------- */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / .45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet {
+  width: 100%; max-width: 640px; max-height: 85vh; overflow-y: auto; background: var(--card);
+  border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.sheet-actions { margin-top: 16px; }

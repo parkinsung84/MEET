@@ -30,7 +30,10 @@ async function register(gender = 'male') {
     body: { email: `user${seq}@test.com`, password: 'password123', nickname: `유저${seq}`, gender },
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
-  return res.body;
+  const { token, devCode } = res.body;
+  const verified = await api('POST', '/auth/verify', { token, body: { code: devCode } });
+  assert.equal(verified.status, 200, JSON.stringify(verified.body));
+  return { token, user: verified.body.user };
 }
 
 const rideInput = (overrides = {}) => ({
@@ -42,7 +45,7 @@ const rideInput = (overrides = {}) => ({
 });
 
 before(async () => {
-  ({ server } = createApp({ secret: 'test-secret' }));
+  ({ server } = createApp({ secret: 'test-secret', push: null }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://localhost:${server.address().port}`;
 });
@@ -88,7 +91,7 @@ describe('rides', () => {
     assert.equal(ride.memberCount, 1);
     assert.equal(ride.members[0].id, host.user.id);
     assert.ok(ride.fare.total > 4800);
-    assert.equal(ride.fare.perPersonNow, Math.ceil(ride.fare.total / 10) * 10);
+    assert.equal(ride.fare.shares[host.user.id], Math.ceil(ride.fare.total / 10) * 10);
   });
 
   test('잘못된 입력은 400', async () => {
@@ -115,7 +118,7 @@ describe('rides', () => {
     const joined = await api('POST', `/rides/${id}/join`, { token: guest.token });
     assert.equal(joined.status, 200);
     assert.equal(joined.body.ride.memberCount, 2);
-    assert.equal(joined.body.ride.fare.perPersonNow, joined.body.ride.fare.perPersonFull);
+    assert.equal(joined.body.ride.fare.shares[guest.user.id], joined.body.ride.fare.perPersonFull);
 
     assert.equal((await api('POST', `/rides/${id}/join`, { token: guest.token })).status, 409, '중복 참여');
     const third = await register();
@@ -158,13 +161,13 @@ describe('rides', () => {
   });
 
   test('검색은 반경 내 방만 가까운 순으로 반환', async () => {
-    const host = await register();
+    // 한 사람은 같은 시간대에 합승 하나만 가질 수 있으므로 방장을 나눈다
     const near = await api('POST', '/rides', {
-      token: host.token,
+      token: (await register()).token,
       body: rideInput({ origin: { name: '서울역 인근', lat: 37.556, lng: 126.972 } }),
     });
-    const exact = await api('POST', '/rides', { token: host.token, body: rideInput() });
-    const far = await api('POST', '/rides', { token: host.token, body: rideInput({ origin: HONGDAE }) });
+    const exact = await api('POST', '/rides', { token: (await register()).token, body: rideInput() });
+    const far = await api('POST', '/rides', { token: (await register()).token, body: rideInput({ origin: HONGDAE }) });
 
     const viewer = await register();
     const q = `?originLat=${SEOUL_STN.lat}&originLng=${SEOUL_STN.lng}&destLat=${GANGNAM.lat}&destLng=${GANGNAM.lng}&radiusKm=1`;

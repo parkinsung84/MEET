@@ -23,10 +23,6 @@ CREATE TABLE IF NOT EXISTS rides (
   max_seats   INTEGER NOT NULL CHECK (max_seats BETWEEN 2 AND 4),
   gender_pref TEXT NOT NULL DEFAULT 'any' CHECK (gender_pref IN ('any', 'male', 'female')),
   memo        TEXT NOT NULL DEFAULT '',
-  distance_km  REAL,     -- 네이버 길찾기 실제 도로거리 (없으면 직선거리 추정)
-  duration_min INTEGER,
-  taxi_fare    INTEGER,  -- 네이버 길찾기 예상 택시요금
-  route_path   TEXT,     -- JSON [[lng, lat], ...]
   status      TEXT NOT NULL DEFAULT 'open'
               CHECK (status IN ('open', 'departed', 'completed', 'cancelled')),
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,25 +43,125 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS email_verifications (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  sent_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ratings (
+  ride_id    INTEGER NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+  rater_id   INTEGER NOT NULL REFERENCES users(id),
+  ratee_id   INTEGER NOT NULL REFERENCES users(id),
+  good       INTEGER NOT NULL CHECK (good IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (ride_id, rater_id, ratee_id)
+);
+
+CREATE TABLE IF NOT EXISTS blocks (
+  blocker_id INTEGER NOT NULL REFERENCES users(id),
+  blocked_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (blocker_id, blocked_id)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_id INTEGER NOT NULL REFERENCES users(id),
+  reported_id INTEGER NOT NULL REFERENCES users(id),
+  ride_id     INTEGER REFERENCES rides(id) ON DELETE SET NULL,
+  reason      TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ride_id    INTEGER REFERENCES rides(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  url        TEXT NOT NULL,
+  read_at    TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint   TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- "이 경로로 합승방이 생기면 알려주세요"
+CREATE TABLE IF NOT EXISTS ride_alerts (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  origin_name TEXT NOT NULL,
+  origin_lat  REAL NOT NULL,
+  origin_lng  REAL NOT NULL,
+  dest_name   TEXT NOT NULL,
+  dest_lat    REAL NOT NULL,
+  dest_lng    REAL NOT NULL,
+  radius_km   REAL NOT NULL,
+  depart_from TEXT NOT NULL,
+  depart_to   TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_rides_status_depart ON rides(status, depart_at);
 CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_ride_alerts_to ON ride_alerts(depart_to);
 `;
 
-// 이전 버전 DB 파일에 새 컬럼을 추가한다
-const RIDE_COLUMNS = {
-  distance_km: 'REAL',
-  duration_min: 'INTEGER',
-  taxi_fare: 'INTEGER',
-  route_path: 'TEXT',
+// 이전 버전 DB 파일에 새 컬럼을 추가한다 (ALTER TABLE ADD COLUMN 은 NOT NULL 이면 기본값 필요)
+const COLUMNS = {
+  users: {
+    email_verified: 'INTEGER NOT NULL DEFAULT 0',
+    org_domain: 'TEXT',              // 학교/회사 이메일 도메인 (인증 완료 시)
+    no_show_count: 'INTEGER NOT NULL DEFAULT 0',
+    late_cancel_count: 'INTEGER NOT NULL DEFAULT 0',
+  },
+  rides: {
+    distance_km: 'REAL',             // 네이버 길찾기 실제 도로거리 (없으면 직선거리 추정)
+    duration_min: 'INTEGER',
+    taxi_fare: 'INTEGER',            // 네이버 길찾기 예상 택시요금
+    route_path: 'TEXT',              // JSON [[lng, lat], ...]
+    meeting_point: "TEXT NOT NULL DEFAULT ''",
+    org_domain: 'TEXT',              // 설정 시 같은 소속 인증 사용자만 참여
+    reminded_at: 'TEXT',             // 출발 10분 전 알림 발송 시각
+    payer_id: 'INTEGER',             // 정산: 택시비를 결제한 사람
+    actual_fare: 'INTEGER',
+    payer_account: 'TEXT',
+    completed_at: 'TEXT',
+  },
+  ride_members: {
+    dropoff_name: 'TEXT',            // 가는 길에 먼저 내리는 경우 하차 지점 (NULL = 최종 도착지)
+    dropoff_lat: 'REAL',
+    dropoff_lng: 'REAL',
+    dropoff_t: 'REAL NOT NULL DEFAULT 1', // 경로상 하차 위치 비율 (0~1)
+    arrived_at: 'TEXT',              // 만남 장소 도착 체크인
+    paid_at: 'TEXT',                 // 정산 송금 완료
+  },
 };
 
 function migrate(db) {
-  const existing = new Set(db.prepare('PRAGMA table_info(rides)').all().map((c) => c.name));
-  for (const [column, type] of Object.entries(RIDE_COLUMNS)) {
-    if (!existing.has(column)) db.exec(`ALTER TABLE rides ADD COLUMN ${column} ${type}`);
+  for (const [table, columns] of Object.entries(COLUMNS)) {
+    const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [column, type] of Object.entries(columns)) {
+      if (!existing.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
   }
 }
-
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');

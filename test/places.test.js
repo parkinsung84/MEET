@@ -16,7 +16,7 @@ const fakeNaver = {
 
 const servers = [];
 async function start(options) {
-  const { server } = createApp({ secret: 's', ...options });
+  const { server } = createApp({ secret: 's', push: null, ...options });
   await new Promise((resolve) => server.listen(0, resolve));
   servers.push(server);
   const base = `http://localhost:${server.address().port}/api`;
@@ -25,7 +25,12 @@ async function start(options) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'a@a.com', password: 'password123', nickname: 'a', gender: 'male' }),
   });
-  const { token } = await res.json();
+  const { token, devCode } = await res.json();
+  await fetch(`${base}/auth/verify`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code: devCode }),
+  });
   const call = async (method, path, body) => {
     const r = await fetch(`${base}${path}`, {
       method,
@@ -45,10 +50,12 @@ before(async () => {
 });
 after(() => Promise.all(servers.map((s) => new Promise((r) => s.close(r)))));
 
+// 같은 사용자가 여러 방을 만들므로 출발 시간을 서로 겹치지 않게 벌린다
+let hours = 0;
 const ride = (dest) => ({
   origin: { name: '부산역', lat: 35.1151, lng: 129.0414 },
   destination: { name: dest, lat: 35.1631, lng: 129.1635 },
-  departAt: new Date(Date.now() + 3600_000).toISOString(),
+  departAt: new Date(Date.now() + (hours += 3) * 3600_000).toISOString(),
 });
 
 test('config: 지도 키 노출 여부', async () => {

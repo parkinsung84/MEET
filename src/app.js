@@ -1,21 +1,45 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { Server } from 'socket.io';
+import { createAlertService } from './alerts.js';
 import { openDatabase } from './db.js';
 import { HttpError } from './errors.js';
+import { createMailer } from './mailer.js';
 import { createNaverClient } from './naver.js';
+import { createNotifier } from './notifier.js';
+import { createWebPush } from './push.js';
 import { attachRealtime } from './realtime.js';
 import { createRideService } from './rides.js';
 import { authRouter } from './routes/auth.js';
 import { placesRouter } from './routes/places.js';
 import { ridesRouter } from './routes/rides.js';
+import { alertsRouter, notificationsRouter, usersRouter } from './routes/users.js';
+import { createUserService } from './users.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public', import.meta.url));
+const TICK_MS = 60 * 1000;
 
-export function createApp({ dbPath = ':memory:', secret, naver = createNaverClient() }) {
+/**
+ * naver: 네이버 API 클라이언트, mailer: 메일 발송, push: Web Push 발송기 (테스트에서 대역 주입)
+ * exposeDevCode: 메일 서버가 없을 때 인증번호를 응답에 포함 (개발용)
+ */
+export function createApp({
+  dbPath = ':memory:',
+  secret,
+  naver = createNaverClient(),
+  mailer = createMailer({}, { info() {} }),
+  push,
+  exposeDevCode = true,
+}) {
   if (!secret) throw new Error('JWT secret is required');
   const db = openDatabase(dbPath);
+  const pusher = push === undefined ? createWebPush(db) : push;
+  const notifier = createNotifier(db, { push: pusher });
+  const users = createUserService(db, { secret, mailer, exposeDevCode });
   const rides = createRideService(db, {
+    users,
+    notifier,
     // 네이버 길찾기가 설정돼 있으면 실제 도로 경로/택시요금을 사용하고, 실패하면 추정치로 대체
     findRoute: naver.mapsEnabled
       ? (origin, destination) => naver.route(origin, destination).catch((err) => {
@@ -24,18 +48,27 @@ export function createApp({ dbPath = ':memory:', secret, naver = createNaverClie
         })
       : null,
   });
+  const alerts = createAlertService(db, { rides, notifier });
 
   const app = express();
   const server = createServer(app);
-  const realtime = attachRealtime(server, rides, secret);
+  const io = new Server(server);
+  notifier.attach(io);
+  const realtime = attachRealtime(io, rides, secret);
 
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(PUBLIC_DIR));
   app.get('/api/health', (req, res) => res.json({ ok: true }));
-  app.get('/api/config', (req, res) => res.json({ naverMapKeyId: naver.mapKeyId }));
-  app.use('/api/auth', authRouter(db, secret));
+  app.get('/api/config', (req, res) => res.json({
+    naverMapKeyId: naver.mapKeyId,
+    vapidPublicKey: pusher?.publicKey ?? null,
+  }));
+  app.use('/api/auth', authRouter(db, secret, users));
+  app.use('/api/users', usersRouter(users, secret));
+  app.use('/api/notifications', notificationsRouter(notifier, secret));
+  app.use('/api/alerts', alertsRouter(alerts, users, secret));
   app.use('/api/places', placesRouter(naver, secret));
-  app.use('/api/rides', ridesRouter(rides, secret, realtime.notifyRide));
+  app.use('/api/rides', ridesRouter({ rides, users, alerts, secret, changed: realtime.rideChanged }));
   app.use('/api', (req, res) => res.status(404).json({ error: '존재하지 않는 API입니다.' }));
 
   // Express 5 forwards thrown errors (sync and async) here.
@@ -46,5 +79,20 @@ export function createApp({ dbPath = ':memory:', secret, naver = createNaverClie
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   });
 
-  return { app, server, db, io: realtime.io };
+  /** 주기 작업 1회 실행: 출발 알림, 방 자동 정리, 만료된 경로 알림 삭제 */
+  function tick(now = Date.now()) {
+    for (const rideId of rides.tick(now)) realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
+    alerts.purgeExpired(now);
+  }
+
+  return {
+    app, server, db, io, tick,
+    startScheduler() {
+      const timer = setInterval(() => {
+        try { tick(); } catch (err) { console.error('[scheduler]', err); }
+      }, TICK_MS);
+      server.on('close', () => clearInterval(timer));
+      tick();
+    },
+  };
 }

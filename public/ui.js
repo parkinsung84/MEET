@@ -26,3 +26,43 @@ export function debounce(fn, ms) {
     timer = setTimeout(() => fn(...args), ms);
   };
 }
+
+/**
+ * 하단 시트(모달). content: 노드, actions: [{ label, class, onClick(close) }]
+ * → close()
+ */
+export function sheet(title, content, actions = []) {
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => e.key === 'Escape' && close();
+  const overlay = h('div', { class: 'sheet-backdrop', onclick: (e) => e.target === overlay && close() },
+    h('div', { class: 'sheet', role: 'dialog', 'aria-label': title },
+      h('div', { class: 'sheet-head' }, h('strong', {}, title), h('button', { class: 'secondary small', 'aria-label': '닫기', onclick: close }, '✕')),
+      h('div', { class: 'sheet-body' }, content),
+      actions.length && h('div', { class: 'row sheet-actions' },
+        actions.map((a) => h('button', { class: a.class ?? '', onclick: () => a.onClick(close) }, a.label)))));
+  document.addEventListener('keydown', onKey);
+  document.body.append(overlay);
+  return close;
+}
+
+/** 확인 시트. 확인하면 true */
+export function ask(title, message, { confirmLabel = '확인', danger = false } = {}) {
+  return new Promise((resolve) => {
+    sheet(title, h('p', {}, message), [
+      { label: '취소', class: 'secondary', onClick: (close) => { close(); resolve(false); } },
+      { label: confirmLabel, class: danger ? 'danger' : '', onClick: (close) => { close(); resolve(true); } },
+    ]);
+  });
+}
+
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('복사했어요.');
+  } catch {
+    toast(text);
+  }
+}
