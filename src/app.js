@@ -105,6 +105,8 @@ export function createApp({
   app.get('/api/config', (req, res) => res.json({
     naverMapKeyId: naver.mapKeyId,
     vapidPublicKey: pusher?.publicKey ?? null,
+    // 문자 발송 준비 상태 — 문자가 안 가는데 "보냈어요"라고 안내하지 않도록
+    sms: { ready: sms.configured, showCodes: exposeDevCode && !sms.configured },
   }));
   app.use('/api/auth', authRouter(db, auth, users, account, authLimits));
   // 위치정보 이용·제공 사실 확인자료 열람 (본인)

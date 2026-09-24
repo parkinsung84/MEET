@@ -123,6 +123,23 @@ export function authScreen() {
   return root;
 }
 
+/**
+ * 문자 발송이 준비되지 않았을 때 안내 (문자가 안 가는데 기다리지 않도록).
+ *  - 시범 운영 모드: 인증번호를 화면에 보여준다 → 번호가 없으면 "다시 받기"를 누르라고 안내
+ *  - 그 외: 운영자가 설정해야 한다고 안내
+ */
+function smsNotice(sms, devCode) {
+  if (sms.ready) return null;
+  if (sms.showCodes) {
+    return devCode ? null : h('p', { class: 'sms-notice' },
+      '📵 문자 발송은 아직 준비 중이라 문자가 오지 않아요. 아래 ', h('strong', {}, '"다시 받기"'), '를 누르면 인증번호가 이 화면에 표시돼요.');
+  }
+  return h('div', { class: 'sms-notice warn' },
+    h('strong', {}, '📵 아직 인증 문자를 보낼 수 없어요'),
+    h('p', {}, '서비스 운영자가 문자 발송 설정을 마치면 가입할 수 있어요.'),
+    h('p', { class: 'muted' }, '운영자 안내: Render → meet → Environment 에서 네이버 클라우드 SENS 키 4개를 넣거나, 비공개 시범 운영이라면 SHOW_VERIFICATION_CODES 를 1 로 바꾼 뒤 "다시 받기"를 눌러 주세요.'));
+}
+
 /** 휴대폰 본인 확인. 본인정보가 없는 기존 가입자는 먼저 입력한다. */
 export function verifyScreen() {
   const root = h('div');
@@ -158,9 +175,11 @@ export function verifyScreen() {
     const input = h('input', {
       name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: '인증번호 6자리', required: true,
     });
+    const sms = state.config.sms ?? { ready: true, showCodes: false };
     const form = h('form', { class: 'card stack' },
-      h('p', {}, h('strong', {}, `${state.user.name} · ${state.user.phone}`), ' 으로 보낸 인증번호를 입력해 주세요.'),
-      devCode && h('p', { class: 'muted dev-note' }, `개발 모드(문자 발송 미설정) 인증번호: ${devCode}`),
+      smsNotice(sms, devCode),
+      h('p', {}, h('strong', {}, `${state.user.name} · ${state.user.phone}`), sms.ready ? ' 으로 보낸 인증번호를 입력해 주세요.' : ' 의 인증번호를 입력해 주세요.'),
+      devCode && h('p', { class: 'muted dev-note' }, `시범 운영 모드 인증번호: ${devCode}`),
       input,
       h('button', {}, '인증하기'),
       h('div', { class: 'row' },
@@ -235,7 +254,7 @@ export function forgotScreen() {
     const password = h('input', { type: 'password', placeholder: '새 비밀번호 (8자 이상)', minlength: 8, required: true, autocomplete: 'new-password' });
     const form = h('form', { class: 'card stack' },
       h('p', {}, h('strong', {}, email), ' 계정의 인증된 휴대폰(휴대폰 인증 전 계정은 이메일)으로 보낸 인증번호를 입력해 주세요.'),
-      devCode && h('p', { class: 'muted dev-note' }, `개발 모드 인증번호: ${devCode}`),
+      devCode && h('p', { class: 'muted dev-note' }, `시범 운영 모드 인증번호: ${devCode}`),
       code, password,
       h('button', {}, '비밀번호 바꾸기'),
       h('button', { type: 'button', class: 'secondary', onclick: () => render() }, '다시 받기'));

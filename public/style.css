@@ -255,3 +255,8 @@ button.ok { background: #16a34a; color: #fff; }
 .similar-row { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
 .similar-row a { text-decoration: none; }
 .similar-row button { justify-self: start; }
+
+/* ---------- 문자 발송 미설정 안내 ---------- */
+.sms-notice { background: #fef3c7; color: #92400e; border-radius: 10px; padding: 10px 12px; font-size: .9rem; margin: 0; }
+.sms-notice.warn { background: #fee2e2; color: #991b1b; display: grid; gap: 4px; }
+.sms-notice p { margin: 0; }
