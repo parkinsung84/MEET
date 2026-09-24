@@ -1,0 +1,44 @@
+import { Router } from 'express';
+import { requireAuth } from '../auth.js';
+import { badRequest, HttpError } from '../errors.js';
+import { searchPresetPlaces } from '../places.js';
+
+export function placesRouter(naver, secret) {
+  const router = Router();
+  router.use(requireAuth(secret));
+  const searchConfigured = naver.searchEnabled || naver.mapsEnabled;
+
+  const upstream = (err) => {
+    console.error('[naver]', err.message);
+    return new HttpError(502, '장소 검색 서비스에 일시적인 문제가 있습니다.');
+  };
+
+  router.get('/search', async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q) throw badRequest('검색어를 입력해 주세요.');
+    if (q.length > 50) throw badRequest('검색어가 너무 깁니다.');
+    if (!searchConfigured) return res.json({ places: searchPresetPlaces(q), source: 'preset' });
+    try {
+      res.json({ places: await naver.searchPlaces(q), source: 'naver' });
+    } catch (err) {
+      throw upstream(err);
+    }
+  });
+
+  router.get('/reverse', async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      throw badRequest('좌표가 올바르지 않습니다.');
+    }
+    const fallback = { name: '선택한 위치', address: '', lat, lng };
+    if (!naver.mapsEnabled) return res.json({ place: fallback });
+    try {
+      res.json({ place: (await naver.reverseGeocode(lat, lng)) ?? fallback });
+    } catch (err) {
+      throw upstream(err);
+    }
+  });
+
+  return router;
+}

@@ -1,5 +1,5 @@
-// 장소 검색 API(카카오/네이버 지도) 연동 전까지 사용하는 주요 거점 목록
-export const PLACES = [
+// 네이버 검색 API 키가 없을 때(로컬 개발/테스트) 사용하는 주요 거점 목록
+export const PRESET_PLACES = [
   { name: '서울역', lat: 37.5547, lng: 126.9707 },
   { name: '용산역', lat: 37.5298, lng: 126.9648 },
   { name: '강남역', lat: 37.4979, lng: 127.0276 },
@@ -18,6 +18,9 @@ export const PLACES = [
   { name: '김포공항', lat: 37.5586, lng: 126.7945 },
   { name: '인천공항 T1', lat: 37.4492, lng: 126.4508 },
   { name: '인천공항 T2', lat: 37.4690, lng: 126.4337 },
-];
+].map((p) => ({ ...p, address: '', category: '주요 거점' }));
 
-export const findPlace = (name) => PLACES.find((p) => p.name === name.trim());
+export function searchPresetPlaces(query) {
+  const q = query.replace(/\s/g, '');
+  return PRESET_PLACES.filter((p) => p.name.replace(/\s/g, '').includes(q));
+}

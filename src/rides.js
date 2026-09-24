@@ -37,7 +37,11 @@ function requirePlace(place, label) {
   };
 }
 
-export function createRideService(db) {
+/**
+ * findRoute(origin, destination): 실제 도로 경로를 돌려주는 선택적 함수
+ *   → { distanceKm, durationMin, taxiFare, path } 또는 null (추정치 사용)
+ */
+export function createRideService(db, { findRoute = null } = {}) {
   const stmt = {
     rideById: db.prepare('SELECT * FROM rides WHERE id = ?'),
     members: db.prepare(`
@@ -48,8 +52,9 @@ export function createRideService(db) {
     isMember: db.prepare('SELECT 1 FROM ride_members WHERE ride_id = ? AND user_id = ?'),
     insertRide: db.prepare(`
       INSERT INTO rides (host_id, origin_name, origin_lat, origin_lng, dest_name, dest_lat, dest_lng,
-                         depart_at, max_seats, gender_pref, memo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                         depart_at, max_seats, gender_pref, memo,
+                         distance_km, duration_min, taxi_fare, route_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertMember: db.prepare('INSERT INTO ride_members (ride_id, user_id) VALUES (?, ?)'),
     deleteMember: db.prepare('DELETE FROM ride_members WHERE ride_id = ? AND user_id = ?'),
     setHost: db.prepare('UPDATE rides SET host_id = ? WHERE id = ?'),
@@ -77,7 +82,10 @@ export function createRideService(db) {
 
   function serialize(ride, { withMembers = false } = {}) {
     const memberCount = stmt.memberCount.get(ride.id).n;
-    const { distanceKm, fare } = estimateFare(ride.origin_lat, ride.origin_lng, ride.dest_lat, ride.dest_lng);
+    const fromNaver = ride.taxi_fare !== null && ride.taxi_fare !== undefined;
+    const { distanceKm, fare } = fromNaver
+      ? { distanceKm: ride.distance_km, fare: ride.taxi_fare }
+      : estimateFare(ride.origin_lat, ride.origin_lng, ride.dest_lat, ride.dest_lng);
     const result = {
       id: ride.id,
       hostId: ride.host_id,
@@ -90,14 +98,19 @@ export function createRideService(db) {
       status: ride.status,
       memberCount,
       fare: {
+        source: fromNaver ? 'naver' : 'estimate',
         distanceKm,
+        durationMin: ride.duration_min ?? null,
         total: fare,
         // 지금 인원 기준 1인 부담금과, 정원이 모두 찼을 때의 1인 부담금
         perPersonNow: splitFare(fare, memberCount),
         perPersonFull: splitFare(fare, ride.max_seats),
       },
     };
-    if (withMembers) result.members = stmt.members.all(ride.id);
+    if (withMembers) {
+      result.members = stmt.members.all(ride.id);
+      result.routePath = ride.route_path ? JSON.parse(ride.route_path) : null;
+    }
     return result;
   }
 
@@ -106,7 +119,7 @@ export function createRideService(db) {
   }
 
   return {
-    create(hostId, input = {}) {
+    async create(hostId, input = {}) {
       const origin = requirePlace(input.origin, '출발지');
       const destination = requirePlace(input.destination, '도착지');
       const departAt = new Date(input.departAt);
@@ -125,10 +138,14 @@ export function createRideService(db) {
         throw badRequest('본인이 참여할 수 없는 성별 조건입니다.');
       }
 
+      const route = findRoute ? await findRoute(origin, destination) : null;
+
       const rideId = transaction(db, () => {
         const { lastInsertRowid } = stmt.insertRide.run(
           hostId, origin.name, origin.lat, origin.lng, destination.name, destination.lat, destination.lng,
           departAt.toISOString(), maxSeats, genderPref, memo,
+          route?.distanceKm ?? null, route?.durationMin ?? null, route?.taxiFare ?? null,
+          route?.path?.length ? JSON.stringify(route.path) : null,
         );
         stmt.insertMember.run(lastInsertRowid, hostId);
         return Number(lastInsertRowid);

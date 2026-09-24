@@ -9,8 +9,8 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --no-warnings=ExperimentalWarning src/index.js",
-    "dev": "node --no-warnings=ExperimentalWarning --watch src/index.js",
+    "start": "node --env-file-if-exists=.env --no-warnings=ExperimentalWarning src/index.js",
+    "dev": "node --env-file-if-exists=.env --no-warnings=ExperimentalWarning --watch src/index.js",
     "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.js\""
   },
   "dependencies": {

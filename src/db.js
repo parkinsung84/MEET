@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS rides (
   max_seats   INTEGER NOT NULL CHECK (max_seats BETWEEN 2 AND 4),
   gender_pref TEXT NOT NULL DEFAULT 'any' CHECK (gender_pref IN ('any', 'male', 'female')),
   memo        TEXT NOT NULL DEFAULT '',
+  distance_km  REAL,     -- 네이버 길찾기 실제 도로거리 (없으면 직선거리 추정)
+  duration_min INTEGER,
+  taxi_fare    INTEGER,  -- 네이버 길찾기 예상 택시요금
+  route_path   TEXT,     -- JSON [[lng, lat], ...]
   status      TEXT NOT NULL DEFAULT 'open'
               CHECK (status IN ('open', 'departed', 'completed', 'cancelled')),
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,10 +51,26 @@ CREATE INDEX IF NOT EXISTS idx_rides_status_depart ON rides(status, depart_at);
 CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, id);
 `;
 
+// 이전 버전 DB 파일에 새 컬럼을 추가한다
+const RIDE_COLUMNS = {
+  distance_km: 'REAL',
+  duration_min: 'INTEGER',
+  taxi_fare: 'INTEGER',
+  route_path: 'TEXT',
+};
+
+function migrate(db) {
+  const existing = new Set(db.prepare('PRAGMA table_info(rides)').all().map((c) => c.name));
+  for (const [column, type] of Object.entries(RIDE_COLUMNS)) {
+    if (!existing.has(column)) db.exec(`ALTER TABLE rides ADD COLUMN ${column} ${type}`);
+  }
+}
+
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

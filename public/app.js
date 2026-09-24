@@ -1,4 +1,5 @@
-import { findPlace, PLACES } from './places.js';
+import { loadNaverMaps, mapsAvailable, pickOnMap, renderRouteMap } from './maps.js';
+import { debounce, h, toast } from './ui.js';
 
 const STATUS_LABEL = { open: '모집 중', departed: '이동 중', completed: '완료', cancelled: '취소됨' };
 const GENDER_LABEL = { any: '성별 무관', male: '남성만', female: '여성만' };
@@ -8,34 +9,14 @@ const state = {
   user: null,
   socket: null,
   cleanup: null, // 현재 화면을 떠날 때 실행할 정리 함수
+  mapsReady: Promise.resolve(null), // 네이버 지도 SDK 로드 완료 (실패 시 null)
 };
 
 // ---------- helpers ----------
 
-/** 작은 DOM 빌더. 문자열 자식은 textContent 로 들어가므로 XSS 걱정이 없다. */
-function h(tag, props = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
-    else if (key === 'class') el.className = value;
-    else el.setAttribute(key, value === true ? '' : value);
-  }
-  el.append(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
-  return el;
-}
-
 const won = (n) => `${n.toLocaleString('ko-KR')}원`;
 const formatTime = (iso) =>
   new Date(iso).toLocaleString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
-function toast(message) {
-  const el = document.getElementById('toast');
-  el.textContent = message;
-  el.classList.add('show');
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove('show'), 2500);
-}
 
 async function api(method, path, body) {
   const res = await fetch(`/api${path}`, {
@@ -80,44 +61,112 @@ function connectSocket() {
 
 const emit = (event, payload) => new Promise((resolve) => state.socket.emit(event, payload, resolve));
 
-/** 장소 입력: 목록에서 고르거나(datalist) 현재 위치를 사용한다. */
-function placeInput(name, label, { allowCurrent = false } = {}) {
-  const input = h('input', { name, list: 'places', placeholder: '예: 서울역', autocomplete: 'off' });
-  let current = null;
-  input.addEventListener('input', () => { current = null; });
+const reverseGeocode = (lat, lng) =>
+  api('GET', `/places/reverse?${new URLSearchParams({ lat, lng })}`).then((r) => r.place);
+
+/**
+ * 장소 선택기: 검색어 자동완성(네이버 장소·주소 검색), 현재 위치, 지도에서 선택.
+ * value()는 선택된 {name, address, lat, lng}, 비어 있으면 null, 선택 없이 입력만 했으면 에러.
+ */
+function placePicker(label, { allowCurrent = false } = {}) {
+  let selected = null;
+  let suggestions = [];
+  let seq = 0;
+  const input = h('input', { placeholder: '장소명, 주소 검색', autocomplete: 'off', role: 'combobox', 'aria-label': label });
+  const list = h('ul', { class: 'suggestions', hidden: true, role: 'listbox' });
+  const detail = h('div', { class: 'muted place-addr' });
+
+  function select(place) {
+    selected = place;
+    input.value = place.name;
+    detail.textContent = place.address || '';
+    list.hidden = true;
+  }
+
+  const search = debounce(async (q) => {
+    const id = ++seq;
+    try {
+      const { places } = await api('GET', `/places/search?${new URLSearchParams({ q })}`);
+      if (id !== seq) return;
+      suggestions = places;
+      list.replaceChildren(...(places.length
+        ? places.map((p) => h('li', { role: 'option', onclick: () => select(p) },
+            h('strong', {}, p.name),
+            (p.address || p.category) && h('span', { class: 'muted' }, [p.category, p.address].filter(Boolean).join(' · '))))
+        : [h('li', { class: 'muted' }, '검색 결과가 없어요.')]));
+      list.hidden = false;
+    } catch (err) {
+      if (id === seq) toast(err.message);
+    }
+  }, 300);
+
+  input.addEventListener('input', () => {
+    selected = null;
+    detail.textContent = '';
+    const q = input.value.trim();
+    if (q) search(q);
+    else list.hidden = true;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !list.hidden && suggestions.length) {
+      e.preventDefault();
+      select(suggestions[0]);
+    } else if (e.key === 'Escape') {
+      list.hidden = true;
+    }
+  });
+  // 항목 클릭 전에 blur로 목록이 닫히지 않도록
+  list.addEventListener('mousedown', (e) => e.preventDefault());
+  input.addEventListener('blur', () => { list.hidden = true; });
+
   const useCurrent = allowCurrent && 'geolocation' in navigator && h('button', {
     type: 'button',
     class: 'secondary small fit',
+    title: '현재 위치',
     onclick: () => navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        current = { name: '현재 위치', lat: pos.coords.latitude, lng: pos.coords.longitude };
-        input.value = current.name;
+      async (pos) => {
+        try {
+          select(await reverseGeocode(pos.coords.latitude, pos.coords.longitude));
+        } catch (err) {
+          toast(err.message);
+        }
       },
       () => toast('위치 정보를 가져올 수 없습니다.'),
+      { enableHighAccuracy: true, timeout: 10000 },
     ),
-  }, '📍 현재 위치');
+  }, '📍');
+
+  const onMap = h('button', {
+    type: 'button',
+    class: 'secondary small fit needs-map',
+    title: '지도에서 선택',
+    onclick: async () => {
+      if (!mapsAvailable()) return toast('지도를 사용할 수 없습니다.');
+      const place = await pickOnMap({ title: `${label} 선택`, initial: selected, reverse: reverseGeocode });
+      if (place) select(place);
+    },
+  }, '🗺️');
+
   return {
-    el: h('label', {}, label, useCurrent ? h('div', { class: 'row' }, input, useCurrent) : input),
-    /** 입력값을 {name, lat, lng}로 변환. 비어 있으면 null, 모르는 장소면 에러. */
+    el: h('label', { class: 'place-picker' }, label,
+      h('div', { class: 'row' }, h('div', { class: 'combo' }, input, list), useCurrent, onMap),
+      detail),
     value() {
-      if (current && input.value === current.name) return current;
+      if (selected) return selected;
       if (!input.value.trim()) return null;
-      const place = findPlace(input.value);
-      if (!place) throw new Error(`'${input.value}'은(는) 목록에 없는 장소입니다.`);
-      return place;
+      throw new Error(`${label}: 검색 결과 목록에서 장소를 선택해 주세요.`);
     },
   };
 }
 
-function placesDatalist() {
-  return h('datalist', { id: 'places' }, PLACES.map((p) => h('option', { value: p.name })));
-}
+const routeSummary = (fare) =>
+  `약 ${fare.distanceKm}km${fare.durationMin ? ` · ${fare.durationMin}분` : ''}`;
 
 function rideCard(ride) {
   const seatsLeft = ride.maxSeats - ride.memberCount;
   return h('a', { class: 'card ride-card', href: `#/rides/${ride.id}` },
     h('div', { class: 'route' }, ride.origin.name, h('span', { class: 'arrow' }, '→'), ride.destination.name),
-    h('div', { class: 'muted' }, `${formatTime(ride.departAt)} 출발 · 약 ${ride.fare.distanceKm}km`),
+    h('div', { class: 'muted' }, `${formatTime(ride.departAt)} 출발 · ${routeSummary(ride.fare)}`),
     h('div', { class: 'chips' },
       h('span', { class: 'chip hl' }, `1인 ${won(ride.fare.perPersonFull)}~`),
       h('span', { class: 'chip' }, ride.status === 'open' ? `${ride.memberCount}/${ride.maxSeats}명 · ${seatsLeft}자리 남음` : STATUS_LABEL[ride.status]),
@@ -171,8 +220,8 @@ function authScreen() {
 }
 
 function homeScreen() {
-  const origin = placeInput('origin', '출발지', { allowCurrent: true });
-  const dest = placeInput('dest', '도착지');
+  const origin = placePicker('출발지', { allowCurrent: true });
+  const dest = placePicker('도착지');
   const list = h('div');
   const form = h('form', { class: 'card stack' },
     origin.el, dest.el,
@@ -208,7 +257,6 @@ function homeScreen() {
   load();
 
   return h('div', {},
-    placesDatalist(),
     form,
     list,
     h('a', { class: 'btn fab', href: '#/new' }, '+ 합승방 만들기'),
@@ -216,8 +264,8 @@ function homeScreen() {
 }
 
 function newRideScreen() {
-  const origin = placeInput('origin', '출발지', { allowCurrent: true });
-  const dest = placeInput('dest', '도착지');
+  const origin = placePicker('출발지', { allowCurrent: true });
+  const dest = placePicker('도착지');
   const defaultTime = new Date(Date.now() + 30 * 60_000);
   defaultTime.setMinutes(defaultTime.getMinutes() - defaultTime.getTimezoneOffset());
   const preview = h('p', { class: 'muted' });
@@ -258,12 +306,15 @@ function newRideScreen() {
     }
   });
 
-  return h('div', {}, placesDatalist(), h('h1', {}, '합승방 만들기'), form);
+  return h('div', {}, h('h1', {}, '합승방 만들기'), form);
 }
 
 function rideScreen(rideId) {
   const root = h('div', {}, h('div', { class: 'empty' }, '불러오는 중…'));
   const chatLog = h('div', { class: 'chat-log' });
+  // 지도는 한 번만 그리고, 아래 정보 영역(root)만 다시 렌더링한다
+  const mapEl = h('div', { class: 'route-map' });
+  const mapCard = h('div', { class: 'card map-card needs-map', hidden: true }, mapEl);
   let ride = null;
   let subscribed = false;
 
@@ -345,7 +396,9 @@ function rideScreen(rideId) {
           h('div', {}, h('span', { class: 'muted' }, '전체'), h('strong', {}, won(ride.fare.total))),
           h('div', {}, h('span', { class: 'muted' }, `지금 (${ride.memberCount}명)`), h('strong', {}, won(ride.fare.perPersonNow))),
           h('div', {}, h('span', { class: 'muted' }, `만석 (${ride.maxSeats}명)`), h('strong', {}, won(ride.fare.perPersonFull)))),
-        h('p', { class: 'muted' }, `약 ${ride.fare.distanceKm}km 기준 서울 중형택시 추정 요금이며, 실제 요금과 다를 수 있어요.`)),
+        h('p', { class: 'muted' }, ride.fare.source === 'naver'
+          ? `네이버 길찾기 기준 ${routeSummary(ride.fare)} 예상 요금이며, 교통 상황에 따라 달라질 수 있어요.`
+          : `${routeSummary(ride.fare)} 기준 서울 중형택시 추정 요금이며, 실제 요금과 다를 수 있어요.`)),
       h('div', { class: 'card' },
         h('h2', {}, '👥 탑승자'),
         h('ul', { class: 'members' }, ride.members.map((m) => h('li', {},
@@ -372,10 +425,17 @@ function rideScreen(rideId) {
     if (subscribed) state.socket?.emit('ride:unsubscribe', ride.id);
   };
 
-  api('GET', `/rides/${rideId}`)
-    .then((data) => { ride = data.ride; return render(); })
+  Promise.all([api('GET', `/rides/${rideId}`), state.mapsReady])
+    .then(([data]) => {
+      ride = data.ride;
+      if (mapsAvailable()) {
+        mapCard.hidden = false;
+        renderRouteMap(mapEl, ride);
+      }
+      return render();
+    })
     .catch((err) => root.replaceChildren(h('div', { class: 'empty' }, err.message)));
-  return root;
+  return h('div', {}, mapCard, root);
 }
 
 function myRidesScreen() {
@@ -416,6 +476,10 @@ function route() {
 }
 
 async function boot() {
+  // 지도 SDK는 백그라운드로 로드 (실패해도 앱은 동작)
+  state.mapsReady = api('GET', '/config')
+    .then(({ naverMapKeyId }) => loadNaverMaps(naverMapKeyId))
+    .catch(() => loadNaverMaps(null));
   if (state.token) {
     try {
       ({ user: state.user } = await api('GET', '/auth/me'));

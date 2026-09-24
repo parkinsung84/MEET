@@ -16,8 +16,8 @@ export function ridesRouter(rides, secret, notify) {
     res.json({ rides: rides.mine(req.userId) });
   });
 
-  router.post('/', (req, res) => {
-    const ride = rides.create(req.userId, req.body);
+  router.post('/', async (req, res) => {
+    const ride = await rides.create(req.userId, req.body);
     notify(ride.id);
     res.status(201).json({ ride });
   });
