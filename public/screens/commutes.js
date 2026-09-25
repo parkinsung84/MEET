@@ -272,24 +272,17 @@ export function commuteScreen(id) {
           act(() => api('POST', `/commutes/${c.id}/join`), '🎉 참여했어요! 크루 채팅으로 인사해 보세요.');
         },
       }, state.user ? '🙋 이 노선 같이 타기' : '🙋 로그인하고 같이 타기'),
-      h('p', { class: 'muted' }, '참여하면 정확한 출발 위치·만남 장소와 크루 채팅이 열려요. 운행하는 날마다 출발 1시간 전에 그날 합승방이 자동으로 열려요.'));
+      h('p', { class: 'muted' }, '참여하면 정확한 출발 위치·만남 장소와 크루 채팅이 열려요. 운행하는 날마다 출발 1시간 전에 합승방이 자동으로 열려요.'));
   }
 
-  function scheduleCard() {
-    if (!c.joined || !c.upcoming) return null;
-    return h('div', { class: 'card stack' },
-      h('h2', {}, '🗓️ 다가오는 운행'),
-      h('p', { class: 'muted' }, '못 타는 날은 미리 "불참"을 눌러 주세요. 출발 1시간 전에 그날 탈 사람끼리 합승방이 열려요.'),
-      h('ul', { class: 'trip-list' }, c.upcoming.map((d) => h('li', { class: d.skipping ? 'skipping' : '' },
-        h('div', {},
-          h('strong', {}, `${dateLabel(d.date)} ${c.departTime}`),
-          h('div', { class: 'muted' }, d.rideId ? `합승방 열림 · ${relativeTime(d.departAt)}` : d.opened ? '탈 사람이 모자라 쉬어요' : `${d.riders}명 탈 예정`)),
-        d.rideId
-          ? h('a', { class: 'btn small', href: `#/rides/${d.rideId}` }, '합승방 가기')
-          : d.canChange && h('button', {
-            class: d.skipping ? 'small' : 'secondary small',
-            onclick: () => act(() => api(d.skipping ? 'DELETE' : 'PUT', `/commutes/${c.id}/skips/${d.date}`)),
-          }, d.skipping ? '다시 탈게요' : '이날 불참')))));
+  function todayCard() {
+    if (!c.joined) return null;
+    if (c.currentRide) {
+      return h('a', { class: 'card banner', href: `#/rides/${c.currentRide.rideId}` },
+        h('strong', {}, `🚕 ${relativeTime(c.currentRide.departAt)} 출발하는 합승방이 열렸어요`),
+        h('div', {}, '눌러서 만남 장소 확인·도착 체크인을 해 주세요.'));
+    }
+    return h('p', { class: 'muted' }, '🕐 운행하는 날마다 출발 1시간 전에 합승방이 자동으로 열리고 알림이 가요.');
   }
 
   function membersCard() {
@@ -374,7 +367,7 @@ export function commuteScreen(id) {
           h('div', {}, h('span', { class: 'muted' }, '한 달(20일)이면'), h('strong', {}, `${won((c.fare.total - c.fare.perPerson) * 20)} 절약`))),
         h('p', { class: 'muted small' }, '* 거리로 계산한 예상 요금이에요. 실제 요금은 택시 미터기 기준으로 나눠요.')),
       joinCard(),
-      scheduleCard(),
+      todayCard(),
       chatCard(),
       membersCard(),
       ownerCard(),

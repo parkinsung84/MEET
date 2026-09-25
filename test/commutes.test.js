@@ -133,7 +133,7 @@ describe('정기 노선', () => {
     assert.ok(notes.some((n) => n.type === 'commute_update'));
   });
 
-  test('운행일 출발 1시간 전에 그날 탈 멤버로 합승방이 열린다 (불참 표시한 사람 제외)', async () => {
+  test('운행일 출발 1시간 전에 멤버들로 합승방이 열린다', async () => {
     // 지금부터 50분 뒤 출발하는 매일 노선
     const soon = kstParts(Date.now() + 50 * 60 * 1000);
     const time = `${String(Math.floor(soon.minutes / 60)).padStart(2, '0')}:${String(soon.minutes % 60).padStart(2, '0')}`;
@@ -142,17 +142,13 @@ describe('정기 노선', () => {
     const [a, b] = [await signup(), await signup()];
     await api('POST', `/commutes/${c.id}/join`, { token: a.token });
     await api('POST', `/commutes/${c.id}/join`, { token: b.token });
-    // 이미 1시간 안이라 불참 표시는 막힘 → 다음 운행일(내일)에 불참 표시
-    const tomorrow = kstParts(Date.now() + 50 * 60 * 1000 + 86400000).date;
-    assert.equal((await api('PUT', `/commutes/${c.id}/skips/${soon.date}`, { token: b.token })).status, 409);
-    const skipped = await api('PUT', `/commutes/${c.id}/skips/${tomorrow}`, { token: b.token });
-    assert.equal(skipped.status, 200, JSON.stringify(skipped.body));
-    assert.equal(skipped.body.commute.upcoming.find((d) => d.date === tomorrow).skipping, true);
+    assert.equal((await api('GET', `/commutes/${c.id}`, { token: a.token })).body.commute.currentRide, null);
 
     await tick();
     const detail = (await api('GET', `/commutes/${c.id}`, { token: a.token })).body.commute;
-    const today = detail.upcoming.find((d) => d.date === soon.date);
-    assert.ok(today.rideId, '오늘 합승방 생성');
+    const today = detail.currentRide;
+    assert.ok(today?.rideId, '오늘 합승방 생성');
+    assert.equal((await api('GET', `/commutes/${c.id}`)).body.commute.currentRide, undefined, '비멤버에게는 안 보임');
     const ride = (await api('GET', `/rides/${today.rideId}`, { token: a.token })).body.ride;
     assert.equal(ride.memberCount, 3);
     assert.equal(ride.hostId, owner.user.id);
@@ -164,16 +160,13 @@ describe('정기 노선', () => {
     assert.equal((await api('GET', '/rides/mine', { token: a.token })).body.rides.filter((r) => /정기 노선/.test(r.memo)).length, 1);
   });
 
-  test('그날 탈 사람이 1명뿐이면 합승방을 열지 않고 알려 준다', async () => {
+  test('멤버가 1명뿐이면 합승방을 열지 않고 알려 준다', async () => {
     const soon = kstParts(Date.now() + 45 * 60 * 1000);
     const time = `${String(Math.floor(soon.minutes / 60)).padStart(2, '0')}:${String(soon.minutes % 60).padStart(2, '0')}`;
     const owner = await signup();
     const c = (await post(owner, { origin: GANGNAM, destination: HONGDAE, days: ALL_DAYS, departTime: time })).body.commute;
     await tick();
-    const detail = (await api('GET', `/commutes/${c.id}`, { token: owner.token })).body.commute;
-    const today = detail.upcoming.find((d) => d.date === soon.date);
-    assert.equal(today.rideId, null);
-    assert.equal(today.opened, true);
+    assert.equal((await api('GET', `/commutes/${c.id}`, { token: owner.token })).body.commute.currentRide, null);
     const notes = (await api('GET', '/notifications', { token: owner.token })).body.notifications;
     assert.ok(notes.some((n) => n.type === 'commute_trip_skipped'));
   });

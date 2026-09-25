@@ -47,14 +47,6 @@ export function commutesRouter({ commutes, auth, changed = () => {}, messagePost
     res.json({ commute });
   });
 
-  router.put('/:id/skips/:date', auth.required, (req, res) => {
-    res.json({ commute: commutes.setSkip(req.params.id, req.userId, req.params.date, true) });
-  });
-
-  router.delete('/:id/skips/:date', auth.required, (req, res) => {
-    res.json({ commute: commutes.setSkip(req.params.id, req.userId, req.params.date, false) });
-  });
-
   router.get('/:id/messages', auth.required, (req, res) => {
     res.json({ messages: commutes.messages(req.params.id, req.userId, req.query.after) });
   });

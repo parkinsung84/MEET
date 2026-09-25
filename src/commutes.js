@@ -6,7 +6,7 @@ import { estimateFare, haversineKm, splitFare } from './geo.js';
  * 정기 노선 (출퇴근 택시 크루).
  * "분당 → 강남, 월~금 08:00"처럼 요일·시각을 정해 올리면 같은 길을 가는 사람들이 보고 참여한다.
  * 노선 목록·상세는 로그인 없이도 볼 수 있어 링크로 퍼뜨릴 수 있고, 정확한 출발 위치·만남 장소는 멤버에게만 보인다.
- * 운행하는 날에는 출발 1시간 전에 그날 탈 멤버(불참 표시한 사람 제외)로 합승방을 자동으로 연다
+ * 운행하는 날에는 출발 1시간 전에 멤버들로 합승방을 자동으로 연다 (못 타는 사람은 그 합승방에서 나가면 된다)
  * → 체크인·차량번호·정산·긴급신고 등 기존 합승 기능을 그대로 쓴다.
  */
 
@@ -20,7 +20,6 @@ const TRIP_OPEN_BEFORE_MS = 60 * MIN;  // 출발 1시간 전에 그날 합승방
 const SEARCH_RADIUS_KM = 3;
 const SEARCH_TIME_WINDOW_MIN = 30;
 const MAX_MEMBERSHIPS = 6;              // 한 사람이 참여할 수 있는 노선 수
-const SKIP_AHEAD_DAYS = 14;
 
 // ---------- 한국 시간 도우미 (서버 시간대와 무관하게 KST 기준) ----------
 
@@ -129,10 +128,6 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     insertMessage: db.prepare('INSERT INTO commute_messages (commute_id, user_id, body) VALUES (?, ?, ?)'),
     messageById: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
       FROM commute_messages msg JOIN users u ON u.id = msg.user_id WHERE msg.id = ?`),
-    skip: db.prepare('INSERT OR IGNORE INTO commute_skips (commute_id, user_id, date) VALUES (?, ?, ?)'),
-    unskip: db.prepare('DELETE FROM commute_skips WHERE commute_id = ? AND user_id = ? AND date = ?'),
-    skipsOn: db.prepare('SELECT user_id AS id FROM commute_skips WHERE commute_id = ? AND date = ?'),
-    mySkips: db.prepare('SELECT date FROM commute_skips WHERE commute_id = ? AND user_id = ? AND date >= ? ORDER BY date'),
     trip: db.prepare('SELECT * FROM commute_trips WHERE commute_id = ? AND date = ?'),
     putTrip: db.prepare('INSERT OR IGNORE INTO commute_trips (commute_id, date, ride_id) VALUES (?, ?, ?)'),
     setTripRide: db.prepare('UPDATE commute_trips SET ride_id = ? WHERE commute_id = ? AND date = ?'),
@@ -210,34 +205,21 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       out.origin = { ...out.origin, name: c.origin_name, lat: c.origin_lat, lng: c.origin_lng };
       out.destination = { ...out.destination, name: c.dest_name, lat: c.dest_lat, lng: c.dest_lng };
       out.meetingPoint = c.meeting_point || c.origin_name;
-      if (detail) out.upcoming = upcoming(c, viewerId);
+      if (detail) out.currentRide = currentRide(c);
     }
     return out;
   }
 
-  /** 멤버에게: 앞으로 2주 운행일 — 내 불참 여부, 그날 탈 인원, 열린 합승방 */
-  function upcoming(c, viewerId) {
+  /** 멤버에게: 지금 열려 있는 그날 합승방 (출발 후 3시간까지) → { rideId, departAt } 또는 null */
+  function currentRide(c) {
     const now = Date.now();
     const today = kstParts(now).date;
-    const members = memberIdsOf(c.id);
-    const list = [];
-    for (let i = 0; i < SKIP_AHEAD_DAYS && list.length < 10; i += 1) {
-      const date = addDays(today, i);
-      if (!runsOn(c.days, date)) continue;
-      const at = kstInstant(date, c.depart_time);
+    for (const date of [addDays(today, -1), today, addDays(today, 1)]) {
       const trip = stmt.trip.get(c.id, date);
-      if (at < now - 3 * 60 * MIN && !trip?.ride_id) continue; // 지난 날 (합승방이 있었으면 잠시 보여줌)
-      const skipped = new Set(stmt.skipsOn.all(c.id, date).map((r) => r.id));
-      list.push({
-        date, departAt: new Date(at).toISOString(),
-        skipping: skipped.has(viewerId),
-        riders: members.filter((id) => !skipped.has(id)).length,
-        rideId: trip?.ride_id ?? null,
-        opened: Boolean(trip),
-        canChange: !trip && at - TRIP_OPEN_BEFORE_MS > now,
-      });
+      const at = kstInstant(date, c.depart_time);
+      if (trip?.ride_id && at > now - 3 * 60 * MIN) return { rideId: trip.ride_id, departAt: new Date(at).toISOString() };
     }
-    return list;
+    return null;
   }
 
   function nearEnough(c, q) {
@@ -379,21 +361,6 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       return service.get(c.id, userId);
     },
 
-    /** 이 날 못 타요 / 다시 타요 (그날 합승방이 열리기 전까지) */
-    setSkip(id, userId, date, skip = true) {
-      const c = load(id);
-      assertMember(c, userId);
-      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !runsOn(c.days, date)) throw badRequest('운행하는 날짜가 아니에요.');
-      const at = kstInstant(date, c.depart_time);
-      if (at - TRIP_OPEN_BEFORE_MS <= Date.now() || stmt.trip.get(c.id, date)) {
-        throw conflict('이미 그날 합승방이 열렸어요. 합승방에서 나가기를 해 주세요.');
-      }
-      if (at > Date.now() + SKIP_AHEAD_DAYS * 86400000) throw badRequest(`${SKIP_AHEAD_DAYS}일 안의 날짜만 정할 수 있어요.`);
-      if (skip) stmt.skip.run(c.id, userId, date);
-      else stmt.unskip.run(c.id, userId, date);
-      return service.get(c.id, userId);
-    },
-
     isMember(id, userId) {
       return Boolean(stmt.isMember.get(Number(id), userId));
     },
@@ -419,7 +386,7 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     },
 
     /**
-     * 주기 작업: 운행일 출발 1시간 전에 그날 탈 멤버로 합승방을 연다.
+     * 주기 작업: 운행일 출발 1시간 전에 멤버들로 합승방을 연다.
      * 2명 이상이면 합승방을 만들고(첫 탑승자가 방장) 나머지를 참여시킨다. 1명뿐이면 열지 않고 알려 준다.
      * → 새로 연 합승방 id 목록
      */
@@ -433,13 +400,12 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
           if (at <= now || at - TRIP_OPEN_BEFORE_MS > now) continue;
           // 먼저 기록해서 다음 tick 에서 중복으로 열지 않게
           if (!stmt.putTrip.run(c.id, date, null).changes) continue;
-          const skipped = new Set(stmt.skipsOn.all(c.id, date).map((r) => r.id));
-          const riders = memberIdsOf(c.id).filter((id) => !skipped.has(id));
+          const riders = memberIdsOf(c.id);
           const when = `${date.slice(5).replace('-', '/')} ${c.depart_time}`;
           if (riders.length < 2) {
             fire(riders, {
               type: 'commute_trip_skipped', commuteId: c.id, title: '🙅 오늘은 합승방을 열지 않았어요',
-              body: `${label(c)} · ${when} 탈 사람이 1명뿐이에요.`,
+              body: `${label(c)} · ${when} 아직 멤버가 1명뿐이에요. 노선 링크를 공유해서 같이 탈 사람을 모아 보세요.`,
             });
             continue;
           }

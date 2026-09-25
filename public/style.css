@@ -318,9 +318,6 @@ button.ok { background: #16a34a; color: #fff; }
 .day-toggles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .day-toggles .day { padding: 10px 0; background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
 .day-toggles .day.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
-.trip-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.trip-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.trip-list li.skipping strong { text-decoration: line-through; color: var(--muted); }
 .fare-card .small { font-size: .75rem; margin: 8px 0 0; }
 .members li.member-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .member-row .link { margin-left: auto; }

@@ -175,14 +175,6 @@ CREATE TABLE IF NOT EXISTS commute_messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- "이 날은 못 타요" (날짜: 한국 시간 YYYY-MM-DD)
-CREATE TABLE IF NOT EXISTS commute_skips (
-  commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
-  user_id    INTEGER NOT NULL REFERENCES users(id),
-  date       TEXT NOT NULL,
-  PRIMARY KEY (commute_id, user_id, date)
-);
-
 -- 날짜별로 자동으로 연 합승방 (ride_id NULL = 인원이 모자라 열지 않음)
 CREATE TABLE IF NOT EXISTS commute_trips (
   commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
