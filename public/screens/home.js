@@ -1,6 +1,6 @@
 import { placePicker, rideCard, toLocalInput } from '../components.js';
 import { api, formatTime, listen, relativeTime, state } from '../core.js';
-import { renderRidesMap } from '../maps.js';
+import { mapProblem, renderRidesMap } from '../maps.js';
 import { h, toast } from '../ui.js';
 
 const NOW_WINDOW_MIN = 30;   // '지금 바로': 30분 안에 출발
@@ -80,6 +80,15 @@ export function homeScreen() {
   const mapEl = h('div', { class: 'rides-map' });
   const mapCard = h('div', { class: 'card map-card needs-map', hidden: true }, mapEl);
   let ridesMap = null;
+  // 지도가 안 뜨면 이유를 보여준다 (운영 초기 설정 확인용)
+  const mapNote = h('div', { class: 'card banner warn map-note', hidden: true });
+  const showProblem = (reason) => {
+    if (!reason) return;
+    mapNote.replaceChildren(h('strong', {}, '🗺️ 지도가 꺼져 있어요'), h('div', { class: 'muted' }, reason));
+    mapNote.hidden = false;
+  };
+  state.mapsReady.then(() => showProblem(mapProblem()));
+  listen(window, 'maps:problem', (e) => showProblem(e.detail));
   async function showMap(rides, me) {
     if (!(await state.mapsReady)) return;
     ridesMap?.destroy();
@@ -216,6 +225,7 @@ export function homeScreen() {
     banner,
     upcomingBanner(),
     form,
+    mapNote,
     mapCard,
     list,
     h('a', { class: 'btn fab', href: '#/new' }, '+ 합승방 만들기'),

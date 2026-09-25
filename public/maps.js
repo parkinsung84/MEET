@@ -6,26 +6,32 @@ const SDK_URL = 'https://oapi.map.naver.com/openapi/v3/maps.js';
 const DEFAULT_CENTER = { lat: 37.5666, lng: 126.9784 }; // 서울시청
 
 let sdkPromise = null;
+let problem = null;
 
 function disableMaps(reason) {
   console.warn('[naver maps]', reason);
   document.body.classList.add('no-map');
+  problem = reason;
+  window.dispatchEvent(new CustomEvent('maps:problem', { detail: reason }));
 }
+
+/** 지도가 안 뜨는 이유 (운영자가 고칠 수 있도록 화면에 보여준다). 정상이면 null */
+export const mapProblem = () => problem;
 
 /** SDK를 한 번만 로드한다. 사용할 수 없으면 null로 resolve. */
 export function loadNaverMaps(keyId) {
   if (!keyId) {
-    document.body.classList.add('no-map');
+    disableMaps('서버에 네이버 지도 키가 없어요. Render → Environment 에 NAVER_MAP_KEY_ID / NAVER_MAP_KEY 를 넣고 다시 배포하세요.');
     return Promise.resolve(null);
   }
   sdkPromise ??= new Promise((resolve) => {
     // 네이버가 인증 실패 시 호출하는 전역 콜백 (NCP 콘솔의 Web 서비스 URL 미등록 등)
-    window.navermap_authFailure = () => disableMaps('인증 실패: NCP 콘솔에 현재 도메인이 등록돼 있는지 확인하세요.');
+    window.navermap_authFailure = () => disableMaps(`네이버 지도 인증 실패. NCP 콘솔 → Maps → Application 에서 ① Dynamic Map 이 선택돼 있는지 ② Web 서비스 URL 에 ${location.origin} 이 등록돼 있는지 ③ NAVER_MAP_KEY_ID 가 그 Application 의 Client ID 인지 확인하세요.`);
     const script = document.createElement('script');
     script.src = `${SDK_URL}?ncpKeyId=${encodeURIComponent(keyId)}`;
     script.onload = () => resolve(window.naver?.maps ?? null);
     script.onerror = () => {
-      disableMaps('SDK 로드 실패');
+      disableMaps('네이버 지도 스크립트를 불러오지 못했어요 (네트워크 또는 광고 차단기 확인).');
       resolve(null);
     };
     document.head.append(script);
