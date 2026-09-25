@@ -1,43 +1,22 @@
-import { api, formatTime, GENDER_LABEL, relativeTime, STATUS_LABEL, won } from './core.js';
+import { api, formatTime, GENDER_LABEL, relativeTime, state, STATUS_LABEL, won } from './core.js';
+import { locate, recentHere } from './here.js';
 import { mapsAvailable, pickOnMap } from './maps.js';
 import { debounce, h, toast } from './ui.js';
 
 export const reverseGeocode = (lat, lng) =>
   api('GET', `/places/reverse?${new URLSearchParams({ lat, lng })}`).then((r) => r.place);
 
-// 최근에 받은 현재 위치 (가까운 장소 먼저 검색용, 이 탭에서만 10분 기억)
-const HERE_KEY = 'meet.here';
-const HERE_TTL_MS = 10 * 60 * 1000;
-export function rememberHere(lat, lng) {
-  try { sessionStorage.setItem(HERE_KEY, JSON.stringify({ lat, lng, at: Date.now() })); } catch { /* 저장 불가 */ }
-}
-function recentHere() {
-  try {
-    const here = JSON.parse(sessionStorage.getItem(HERE_KEY));
-    return here && Date.now() - here.at < HERE_TTL_MS ? here : null;
-  } catch {
-    return null;
-  }
-}
-let locating = null;
-/** 검색창을 누르면 현재 위치를 한 번 받아 둔다 (거부했으면 다시 묻지 않음) */
-async function locateForSearch() {
-  if (recentHere() || locating || !('geolocation' in navigator)) return;
-  try {
-    const status = await navigator.permissions?.query({ name: 'geolocation' });
-    if (status?.state === 'denied') return;
-  } catch { /* permissions API 미지원 브라우저 */ }
-  locating = new Promise((resolve) => navigator.geolocation.getCurrentPosition(
-    (pos) => { rememberHere(pos.coords.latitude, pos.coords.longitude); resolve(); },
-    () => resolve(),
-    { enableHighAccuracy: false, maximumAge: 5 * 60 * 1000, timeout: 8000 },
-  )).finally(() => { locating = null; });
-}
+export const formatKm = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km}km`);
 
-const formatKm = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km}km`);
+/** 장소 이름·주소 검색 (현재 위치를 알면 가까운 곳 먼저) → { places, source } */
+export function searchPlaces(q) {
+  const here = recentHere();
+  return api('GET', `/places/search?${new URLSearchParams({ q, ...(here && { lat: here.lat, lng: here.lng }) })}`);
+}
 
 /**
- * 장소 선택기: 검색어 자동완성(네이버 장소·주소 검색), 현재 위치, 지도에서 선택.
+ * 장소 선택기: 칸을 누르면 지도가 열리고 핀으로 찍는다 (지도 안에서 이름 검색으로 이동 가능).
+ * 지도를 쓸 수 없으면 이름·주소 검색 자동완성으로 대신한다. 현재 위치 버튼(allowCurrent)도 있다.
  * value()는 선택된 {name, address, lat, lng}, 비어 있으면 null, 선택 없이 입력만 했으면 에러.
  */
 export function placePicker(label, { allowCurrent = false } = {}) {
@@ -48,11 +27,37 @@ export function placePicker(label, { allowCurrent = false } = {}) {
   const list = h('ul', { class: 'suggestions', hidden: true, role: 'listbox' });
   const detail = h('div', { class: 'muted place-addr' });
 
+  // 지도로 찍는 칸 (기본)
+  const field = h('button', { type: 'button', class: 'place-field needs-map', 'aria-label': `${label} 지도에서 찍기` });
+  function renderField() {
+    field.replaceChildren(...(selected
+      ? [h('strong', {}, selected.name), selected.address ? h('span', { class: 'muted' }, selected.address) : null]
+      : [h('span', { class: 'place-field-empty' }, `📍 지도에서 ${label} 찍기`)]).filter(Boolean));
+  }
+  field.addEventListener('click', async () => {
+    await state.mapsReady;
+    if (!mapsAvailable()) {
+      toast('지도를 쓸 수 없어서 이름으로 검색해 주세요.');
+      input.focus();
+      return;
+    }
+    const place = await pickOnMap({
+      title: `${label} 찍기`,
+      confirmLabel: `여기를 ${label}로`,
+      initial: selected ?? recentHere(),
+      locateFirst: !selected,
+      reverse: reverseGeocode,
+      search: searchPlaces,
+    });
+    if (place) pick(place);
+  });
+
   function select(place) {
     selected = place;
     input.value = place.name;
     detail.textContent = place.address || '';
     list.hidden = true;
+    renderField();
   }
   /** 사용자가 직접 고른 경우 (검색 결과·현재 위치·지도) — 화면이 따라 움직이도록 알린다 */
   function pick(place) {
@@ -63,9 +68,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
   const search = debounce(async (q) => {
     const id = ++seq;
     try {
-      const here = recentHere();
-      const params = new URLSearchParams({ q, ...(here && { lat: here.lat, lng: here.lng }) });
-      const { places, source } = await api('GET', `/places/search?${params}`);
+      const { places, source } = await searchPlaces(q);
       if (id !== seq) return;
       suggestions = places;
       // 네이버 검색 키가 없으면 주요 장소 몇 곳만 검색된다는 걸 알려준다
@@ -83,7 +86,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     }
   }, 300);
 
-  input.addEventListener('focus', locateForSearch, { once: true });
+  input.addEventListener('focus', () => locate(), { once: true });
   input.addEventListener('input', () => {
     selected = null;
     detail.textContent = '';
@@ -107,37 +110,29 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     type: 'button',
     class: 'secondary small fit',
     title: '현재 위치',
-    onclick: () => navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        rememberHere(pos.coords.latitude, pos.coords.longitude);
-        try {
-          pick(await reverseGeocode(pos.coords.latitude, pos.coords.longitude));
-        } catch (err) {
-          toast(err.message);
-        }
-      },
-      () => toast('위치 정보를 가져올 수 없습니다.'),
-      { enableHighAccuracy: true, timeout: 10000 },
-    ),
+    onclick: async () => {
+      const here = await locate({ accurate: true });
+      if (!here) return toast('위치 정보를 가져올 수 없습니다. 브라우저의 위치 권한을 확인해 주세요.');
+      try {
+        pick(await reverseGeocode(here.lat, here.lng));
+      } catch (err) {
+        toast(err.message);
+      }
+    },
   }, '📍');
 
-  const onMap = h('button', {
-    type: 'button',
-    class: 'secondary small fit needs-map',
-    title: '지도에서 선택',
-    onclick: async () => {
-      if (!mapsAvailable()) return toast('지도를 사용할 수 없습니다.');
-      const place = await pickOnMap({ title: `${label} 선택`, initial: selected, reverse: reverseGeocode });
-      if (place) pick(place);
-    },
-  }, '🗺️');
 
+  renderField();
   const picker = {
     /** 사용자가 장소를 고르면 호출 (set()으로 넣을 때는 호출하지 않음) */
     onChange: null,
-    el: h('label', { class: 'place-picker' }, label,
-      h('div', { class: 'row' }, h('div', { class: 'combo' }, input, list), useCurrent, onMap),
-      detail),
+    el: h('div', { class: 'place-picker' }, h('span', { class: 'field-label' }, label),
+      h('div', { class: 'row' },
+        field,
+        // 지도를 쓸 수 없을 때만: 이름·주소 검색
+        h('div', { class: 'combo no-map-only' }, input, list),
+        useCurrent),
+      h('div', { class: 'no-map-only' }, detail)),
     set: select,
     value() {
       if (selected) return selected;

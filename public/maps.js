@@ -1,3 +1,4 @@
+import { locate } from './here.js';
 import { debounce, h } from './ui.js';
 
 // 네이버 지도 JavaScript API v3 연동. 키가 없거나 인증에 실패하면 지도 기능만 숨기고 나머지는 그대로 동작한다.
@@ -125,22 +126,33 @@ export function renderRidesMap(container, rides, { me, label, onPick }) {
 }
 
 /**
- * 지도에서 위치 고르기 (가운데 핀 방식). 지도를 움직이면 가운데 좌표의 주소를 보여준다.
- * reverse(lat, lng) → Promise<{ name, address, lat, lng }>
+ * 지도에서 핀으로 위치 찍기 (가운데 핀 방식). 지도를 움직이거나 누르면 가운데 좌표의 주소를 보여준다.
+ * 위쪽 검색창으로 장소 이름을 찾으면 그곳으로 지도가 이동하고, 핀 위치를 확인한 뒤 확정한다.
+ *  reverse(lat, lng) → Promise<{ name, address, lat, lng }>
+ *  search(q) → Promise<{ places }>
+ *  locateFirst: 처음 열 때 현재 위치로 이동
  * 확인하면 선택한 장소, 취소하면 null로 resolve.
  */
-export function pickOnMap({ title, initial, reverse }) {
+export function pickOnMap({ title, initial, reverse, search, confirmLabel = '이 위치로 설정', locateFirst = false }) {
   return new Promise((resolve) => {
     let current = null;
+    let chosen = null; // 검색 결과를 골라 이동한 경우 그 장소 이름을 쓴다 (지도를 움직이면 해제)
     const mapEl = h('div', { class: 'picker-map' });
     const nameEl = h('strong', {}, '위치를 불러오는 중…');
     const addrEl = h('div', { class: 'muted' });
-    const confirmBtn = h('button', { disabled: true }, '이 위치로 설정');
+    const confirmBtn = h('button', { class: 'wide', disabled: true }, confirmLabel);
+    const query = h('input', { type: 'search', placeholder: '🔍 장소 이름으로 이동 (예: 동대구역)', autocomplete: 'off', 'aria-label': '장소 이름으로 이동' });
+    const results = h('ul', { class: 'suggestions picker-results', hidden: true });
+    const locateBtn = h('button', { type: 'button', class: 'picker-locate', 'aria-label': '내 위치로' }, '◎');
     const overlay = h('div', { class: 'picker', role: 'dialog', 'aria-label': title },
       h('div', { class: 'picker-head' },
-        h('button', { class: 'secondary small', onclick: () => close(null) }, '✕'),
-        h('strong', {}, title)),
-      h('div', { class: 'picker-body' }, mapEl, h('div', { class: 'picker-pin' }, '📍')),
+        h('button', { class: 'secondary small', 'aria-label': '닫기', onclick: () => close(null) }, '✕'),
+        h('div', { class: 'picker-search' }, query, results)),
+      h('div', { class: 'picker-body' },
+        mapEl,
+        h('div', { class: 'picker-guide' }, `👆 지도를 움직여 📍 핀을 ${title.replace(/ 찍기$/, '')} 위치에 맞춰 주세요`),
+        h('div', { class: 'picker-pin' }, '📍'),
+        locateBtn),
       h('div', { class: 'picker-foot' }, nameEl, addrEl, confirmBtn));
 
     function close(result) {
@@ -162,25 +174,84 @@ export function pickOnMap({ title, initial, reverse }) {
     const lookup = debounce(async () => {
       const center = map.getCenter();
       const id = ++seq;
-      try {
-        const place = await reverse(center.lat(), center.lng());
-        if (id !== seq) return; // 더 최근 요청이 있으면 무시
-        current = place;
-        nameEl.textContent = place.name;
-        addrEl.textContent = place.address;
-        confirmBtn.disabled = false;
-      } catch (err) {
-        if (id === seq) nameEl.textContent = err.message;
+      if (chosen && Math.abs(center.lat() - chosen.lat) < 1e-5 && Math.abs(center.lng() - chosen.lng) < 1e-5) {
+        current = chosen;
+      } else {
+        chosen = null;
+        try {
+          const place = await reverse(center.lat(), center.lng());
+          if (id !== seq) return; // 더 최근 요청이 있으면 무시
+          current = place;
+        } catch (err) {
+          if (id === seq) nameEl.textContent = err.message;
+          return;
+        }
       }
+      nameEl.textContent = current.name;
+      addrEl.textContent = current.address || '';
+      confirmBtn.disabled = false;
     }, 350);
 
-    naver.maps.Event.addListener(map, 'dragstart', () => { confirmBtn.disabled = true; });
+    const moveTo = (point, zoom) => {
+      confirmBtn.disabled = true;
+      map.setCenter(latLng(point));
+      if (zoom) map.setZoom(zoom);
+      lookup();
+    };
+
+    naver.maps.Event.addListener(map, 'dragstart', () => {
+      chosen = null;
+      confirmBtn.disabled = true;
+      results.hidden = true;
+    });
     // 지도를 누르면 그 위치로 핀을 옮긴다
     naver.maps.Event.addListener(map, 'click', (e) => {
+      chosen = null;
       confirmBtn.disabled = true;
+      results.hidden = true;
       map.panTo(e.coord);
     });
     naver.maps.Event.addListener(map, 'idle', lookup);
+
+    locateBtn.addEventListener('click', async () => {
+      const here = await locate({ accurate: true });
+      if (here) moveTo(here, 17);
+      else nameEl.textContent = '현재 위치를 가져올 수 없어요. 브라우저의 위치 권한을 확인해 주세요.';
+    });
+    if (locateFirst) locate().then((here) => { if (here && !chosen && confirmBtn.disabled !== false) moveTo(here); });
+
+    // 이름으로 이동: 결과를 누르면 그곳으로 지도 이동 (확정은 아래 버튼으로)
+    let qseq = 0;
+    const runSearch = debounce(async (q) => {
+      const id = ++qseq;
+      try {
+        const { places } = await search(q);
+        if (id !== qseq) return;
+        results.replaceChildren(...(places.length
+          ? places.map((p) => h('li', {
+            role: 'option',
+            onclick: () => {
+              chosen = p;
+              results.hidden = true;
+              query.blur();
+              moveTo(p, 17);
+            },
+          }, h('strong', {}, p.name), h('span', { class: 'muted' },
+            [p.distanceKm != null && (p.distanceKm < 1 ? `${Math.round(p.distanceKm * 1000)}m` : `${p.distanceKm}km`), p.address]
+              .filter(Boolean).join(' · '))))
+          : [h('li', { class: 'muted' }, '검색 결과가 없어요. 지도를 직접 움직여 찍어 주세요.')]));
+        results.hidden = false;
+      } catch (err) {
+        if (id === qseq) nameEl.textContent = err.message;
+      }
+    }, 300);
+    query.addEventListener('input', () => {
+      const q = query.value.trim();
+      if (q) runSearch(q);
+      else results.hidden = true;
+    });
+    results.addEventListener('mousedown', (e) => e.preventDefault());
+
     lookup();
   });
 }
