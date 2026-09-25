@@ -32,13 +32,13 @@ async function refreshUnread() {
 }
 
 // 로그인 없이 볼 수 있는 화면 (노선 목록·상세는 링크로 퍼뜨리기 위해 공개)
-const PUBLIC = [/^\/$/, /^\/c\/\d+$/, /^\/r\/\d+\/\d+$/, /^\/login$/, /^\/forgot$/];
+const PUBLIC = [/^\/$/, /^\/c\/\d+$/, /^\/r\/[a-z-]+\/[a-z-]+$/, /^\/login$/, /^\/forgot$/];
 // 로그인한 사람은 볼 필요 없는 화면
 const GUEST_ONLY = new Set(['/login', '/forgot']);
 const SCREENS = [
   [/^\/$/, commuteHomeScreen],
   [/^\/c\/(\d+)$/, (id) => commuteScreen(Number(id))],
-  [/^\/r\/(\d+)\/(\d+)$/, (from, to) => routeScreen(from, to)],
+  [/^\/r\/([a-z-]+)\/([a-z-]+)$/, (from, to) => routeScreen(from, to)],
   [/^\/commutes\/new$/, newCommuteScreen],
   [/^\/rides$/, homeScreen],
   [/^\/login$/, authScreen],
@@ -105,8 +105,8 @@ window.addEventListener('session:ended', () => {
 
 async function boot() {
   // 공유 링크(/c/12)로 들어오면 앱 주소(#/c/12)로 바꾼다
-  // 공유 링크(/c/12, /r/출발동/도착동)로 들어오면 앱 주소(#/…)로 바꾼다
-  const shared = location.pathname.match(/^\/(c\/\d+|r\/\d+\/\d+)$/);
+  // 공유 링크(/c/12, /r/출발거점/도착거점)로 들어오면 앱 주소(#/…)로 바꾼다
+  const shared = location.pathname.match(/^\/(c\/\d+|r\/[a-z-]+\/[a-z-]+)$/);
   if (shared) history.replaceState(null, '', `/#/${shared[1]}`);
   registerServiceWorker();
   const config = await api('GET', '/config').catch(() => ({}));

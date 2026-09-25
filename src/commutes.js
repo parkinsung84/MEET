@@ -1,12 +1,12 @@
 import { transaction } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
-import { getDong } from './dongs.js';
+import { FEATURED_ROUTES, getHub, HUB_GROUPS, HUBS } from './hubs.js';
 import { estimateFare, haversineKm, splitFare } from './geo.js';
 
 /**
  * 정기 노선 (출퇴근 택시 크루).
- * 서울 행정동 427개 사이의 "출발 동 → 도착 동" 노선이 미리 깔려 있고, 그 노선에서 요일·시각을 정한 크루를
- * 만들거나 참여한다 (예: 강남구 역삼1동 → 종로구 종로1·2·3·4가동, 월~금 08:00).
+ * 주요 업무지구·역세권 거점 사이의 "출발 거점 → 도착 거점" 노선이 모두 미리 깔려 있고, 그 노선에서 요일·시각을
+ * 정한 크루를 만들거나 참여한다 (예: 잠실 → 강남역, 월~금 08:00). 정확한 탑승 위치는 노선 채팅에서 정한다.
  * 노선 목록·상세는 로그인 없이도 볼 수 있어 링크로 퍼뜨릴 수 있고, 정확한 출발 위치·만남 장소는 멤버에게만 보인다.
  * 운행하는 날에는 출발 1시간 전에 멤버들로 합승방을 자동으로 연다 (못 타는 사람은 그 합승방에서 나가면 된다)
  * → 체크인·차량번호·정산·긴급신고 등 기존 합승 기능을 그대로 쓴다.
@@ -68,12 +68,13 @@ export function nextRun(days, time, now = Date.now()) {
 /** 노선 채팅 실시간 room 이름 */
 export const routeRoom = (from, to) => `route:${from}:${to}`;
 
-/** 서울 행정동 코드 → 동 (없으면 400) */
-function requireDong(code, label) {
-  const dong = getDong(code);
-  if (!dong) throw badRequest(`${label} 동을 골라 주세요.`);
-  return dong;
+/** 거점 id → 거점 (없으면 400) */
+function requireHub(id, label) {
+  const hub = getHub(id);
+  if (!hub) throw badRequest(`${label} 거점을 골라 주세요.`);
+  return { ...hub, code: hub.id };
 }
+const hubInfo = (hub) => ({ code: hub.id, name: hub.name, group: hub.group });
 
 function parseDays(input) {
   const list = Array.isArray(input) ? input : [];
@@ -244,9 +245,9 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     /** 노선 올리기 → 만든 사람이 첫 멤버 */
     async create(ownerId, input = {}) {
       users.requireVerified(ownerId);
-      const origin = requireDong(input.from, '출발');
-      const destination = requireDong(input.to, '도착');
-      if (origin.code === destination.code) throw badRequest('출발 동과 도착 동이 같아요.');
+      const origin = requireHub(input.from, '출발');
+      const destination = requireHub(input.to, '도착');
+      if (origin.code === destination.code) throw badRequest('출발과 도착이 같아요.');
       const days = parseDays(input.days);
       const time = parseTime(input.departTime);
       const maxSeats = Number(input.maxSeats ?? 4);
@@ -297,9 +298,9 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
      * 양 끝이 1.5km 안인 이웃 동 노선의 크루(같이 타기 괜찮은 경우)를 함께 보여준다.
      */
     route(fromCode, toCode, viewerId = null) {
-      const from = requireDong(fromCode, '출발');
-      const to = requireDong(toCode, '도착');
-      if (from.code === to.code) throw badRequest('출발 동과 도착 동이 같아요.');
+      const from = requireHub(fromCode, '출발');
+      const to = requireHub(toCode, '도착');
+      if (from.code === to.code) throw badRequest('출발과 도착이 같아요.');
       const { fare, distanceKm } = estimateFare(from.lat, from.lng, to.lat, to.lng);
       const open = stmt.open.all();
       const exact = open.filter((c) => c.origin_code === from.code && c.dest_code === to.code);
@@ -308,20 +309,33 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
         && haversineKm(to.lat, to.lng, c.dest_lat, c.dest_lng) <= 1.5);
       const byTime = (a, b) => a.depart_time.localeCompare(b.depart_time);
       return {
-        from: { code: from.code, gu: from.gu, dong: from.dong },
-        to: { code: to.code, gu: to.gu, dong: to.dong },
+        from: hubInfo(from),
+        to: hubInfo(to),
         distanceKm, fare: { total: fare, perPerson: splitFare(fare, 4) },
         commutes: exact.sort(byTime).map((c) => serialize(c, { viewerId })),
         nearby: nearby.sort(byTime).slice(0, 20).map((c) => serialize(c, { viewerId })),
       };
     },
 
+    /** 거점 목록과 추천 노선 (각 노선의 모집 중인 크루 수·참여 인원 포함) */
+    hubs() {
+      const counts = new Map(stmt.popular.all(10000).map((r) => [`${r.from}>${r.to}`, r]));
+      const featured = FEATURED_ROUTES.map(([from, to]) => {
+        const a = getHub(from);
+        const b = getHub(to);
+        const n = counts.get(`${from}>${to}`);
+        const { fare } = estimateFare(a.lat, a.lng, b.lat, b.lng);
+        return { from: hubInfo(a), to: hubInfo(b), crews: n?.crews ?? 0, riders: n?.riders ?? 0, perPerson: splitFare(fare, 4) };
+      });
+      return { groups: HUB_GROUPS, hubs: HUBS.map((x) => ({ ...hubInfo(x), lat: x.lat, lng: x.lng })), featured };
+    },
+
     /** 사람이 많이 모인 노선 */
     popular(limit = 10) {
       return stmt.popular.all(limit).map((r) => {
-        const from = getDong(r.from);
-        const to = getDong(r.to);
-        return from && to ? { from: { code: from.code, gu: from.gu, dong: from.dong }, to: { code: to.code, gu: to.gu, dong: to.dong }, crews: r.crews, riders: r.riders } : null;
+        const from = getHub(r.from);
+        const to = getHub(r.to);
+        return from && to ? { from: hubInfo(from), to: hubInfo(to), crews: r.crews, riders: r.riders } : null;
       }).filter(Boolean);
     },
 
@@ -403,16 +417,16 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
 
     /** 노선 채팅 (로그인한 사람 누구나 읽기, 본인 확인한 사람이 쓰기). 최근 200개 */
     routeMessages(fromCode, toCode, afterId = 0) {
-      const from = requireDong(fromCode, '출발');
-      const to = requireDong(toCode, '도착');
+      const from = requireHub(fromCode, '출발');
+      const to = requireHub(toCode, '도착');
       return stmt.routeMessages.all(from.code, to.code, Number(afterId) || 0).reverse();
     },
 
     postRouteMessage(fromCode, toCode, userId, body) {
       users.requireVerified(userId);
-      const from = requireDong(fromCode, '출발');
-      const to = requireDong(toCode, '도착');
-      if (from.code === to.code) throw badRequest('출발 동과 도착 동이 같아요.');
+      const from = requireHub(fromCode, '출발');
+      const to = requireHub(toCode, '도착');
+      if (from.code === to.code) throw badRequest('출발과 도착이 같아요.');
       const msg = text(body, 500);
       if (!msg) throw badRequest('메시지를 입력해 주세요.');
       const { lastInsertRowid } = stmt.insertRouteMessage.run(from.code, to.code, userId, msg);
@@ -422,7 +436,7 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       recipients.delete(userId);
       if (notifier && recipients.size) {
         notifier.notify([...recipients], {
-          type: 'route_chat', title: `💬 ${from.dong} → ${to.dong} 노선 채팅`, body: `${message.nickname}: ${msg.slice(0, 100)}`,
+          type: 'route_chat', title: `💬 ${from.name} → ${to.name} 노선 채팅`, body: `${message.nickname}: ${msg.slice(0, 100)}`,
           url: `/#/r/${from.code}/${to.code}`, skipRoom: routeRoom(from.code, to.code), store: false,
         }).catch((err) => log.error('[notify]', err.message));
       }

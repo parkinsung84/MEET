@@ -131,7 +131,7 @@ export function createApp({
   app.get('/r/:from/:to', (req, res) => {
     try {
       const r = commutes.route(req.params.from, req.params.to);
-      sendWithMeta(res, `${r.from.gu} ${r.from.dong} → ${r.to.gu} ${r.to.dong} 출퇴근 택시 같이 타요`,
+      sendWithMeta(res, `${r.from.name} → ${r.to.name} 출퇴근 택시 같이 타요`,
         `모집 중인 크루 ${r.commutes.length}개 · 4명이 타면 1인 약 ${r.fare.perPerson.toLocaleString('ko-KR')}원 · MEET`);
     } catch {
       sendWithMeta(res);

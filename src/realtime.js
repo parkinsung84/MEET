@@ -58,7 +58,7 @@ export function attachRealtime(io, rides, auth, { calls = null, commutes = null 
     socket.on('commute:unsubscribe', (id) => socket.leave(commuteRoom(Number(id))));
 
     // 노선 채팅 (로그인한 사람 누구나)
-    const routeKey = ({ from, to } = {}) => (/^\d{10}$/.test(from) && /^\d{10}$/.test(to) ? routeRoom(from, to) : null);
+    const routeKey = ({ from, to } = {}) => (/^[a-z-]{2,30}$/.test(from) && /^[a-z-]{2,30}$/.test(to) ? routeRoom(from, to) : null);
     socket.on('route:subscribe', handle((payload) => {
       const key = routeKey(payload);
       if (!key) throw new HttpError(400, '노선이 올바르지 않습니다.');

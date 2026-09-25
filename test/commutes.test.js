@@ -6,12 +6,12 @@ import { identity, relaxedLimits } from './helpers.js';
 
 // 정기 노선(출퇴근 택시 크루): 공개 목록 → 참여 → 크루 채팅 → 운행일에 합승방 자동 생성
 
-// 서울 행정동 코드
-const YEOKSAM1 = '1168064000';   // 강남구 역삼1동
-const YEOKSAM2 = '1168065000';   // 강남구 역삼2동 (역삼1동과 약 0.9km)
-const JONGNO = '1111061500';     // 종로구 종로1·2·3·4가동
-const SEOGYO = '1144066000';     // 마포구 서교동
-const JAMSIL = '1171065000';     // 송파구 잠실본동
+// 거점 id
+const YEOKSAM1 = 'yeoksam';   // 역삼
+const YEOKSAM2 = 'eonju';     // 언주 (역삼과 약 0.7km)
+const JONGNO = 'jongno';      // 종로
+const SEOGYO = 'hongdae';     // 홍대
+const JAMSIL = 'jamsil';      // 잠실
 const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -60,15 +60,15 @@ describe('시간·표시 도우미', () => {
 });
 
 describe('정기 노선', () => {
-  test('동을 골라 크루를 만들면 로그인 없이도 보이고, 만남 장소는 멤버에게만', async () => {
+  test('거점을 골라 크루를 만들면 로그인 없이도 보이고, 만남 장소는 멤버에게만', async () => {
     const owner = await signup();
     const res = await post(owner, { memo: '역삼역 근처 회사 다녀요', meetingPoint: '역삼역 3번 출구' });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const c = res.body.commute;
     assert.equal(c.daysLabel, '월~금');
     assert.equal(c.memberCount, 1);
-    assert.equal(c.origin.area, '강남구 역삼1동');
-    assert.equal(c.destination.area, '종로구 종로1·2·3·4가동');
+    assert.equal(c.origin.area, '역삼');
+    assert.equal(c.destination.area, '종로');
     assert.equal(c.meetingPoint, '역삼역 3번 출구');
     assert.ok(c.fare.total > 10000 && c.fare.perPerson < c.fare.total);
 
@@ -80,15 +80,16 @@ describe('정기 노선', () => {
     assert.equal(detail.owner.nickname, owner.user.nickname);
   });
 
-  test('미리 깔린 노선: 아무 동 조합이나 열리고, 그 노선의 크루와 이웃 동 크루를 보여준다', async () => {
+  test('미리 깔린 노선: 아무 거점 조합이나 열리고, 그 노선의 크루와 가까운 거점 크루를 보여준다', async () => {
     const owner = await signup();
     const c = (await post(owner, { from: YEOKSAM1, to: SEOGYO, departTime: '07:50' })).body.commute;
     const exact = (await api('GET', `/commutes/routes/${YEOKSAM1}/${SEOGYO}`)).body.route;
-    assert.equal(exact.from.dong, '역삼1동');
-    assert.equal(exact.to.gu, '마포구');
+    assert.equal(exact.from.name, '역삼');
+    assert.equal(exact.to.name, '홍대');
+    assert.equal(exact.to.group, '서북권');
     assert.ok(exact.fare.total > 0 && exact.distanceKm > 5);
     assert.ok(exact.commutes.some((x) => x.id === c.id));
-    // 바로 옆 동(역삼2동)에서 출발하는 노선에서는 '이웃 노선'으로
+    // 바로 옆 거점(언주)에서 출발하는 노선에서는 '가까운 거점 크루'로
     const neighbor = (await api('GET', `/commutes/routes/${YEOKSAM2}/${SEOGYO}`)).body.route;
     assert.ok(!neighbor.commutes.some((x) => x.id === c.id));
     assert.ok(neighbor.nearby.some((x) => x.id === c.id));
@@ -96,7 +97,10 @@ describe('정기 노선', () => {
     const empty = (await api('GET', `/commutes/routes/${JAMSIL}/${SEOGYO}`)).body.route;
     assert.equal(empty.commutes.length, 0);
     assert.equal((await api('GET', `/commutes/routes/${JAMSIL}/${JAMSIL}`)).status, 400);
-    assert.equal((await api('GET', '/commutes/routes/123/456')).status, 400);
+    assert.equal((await api('GET', '/commutes/routes/abc/def')).status, 400);
+    const { hubs, featured, groups } = (await api('GET', '/commutes/hubs')).body;
+    assert.ok(hubs.length >= 40 && groups.includes('강남권'));
+    assert.ok(featured.some((f) => f.from.code === 'jamsil' && f.to.code === 'gangnam' && f.perPerson > 0));
     // 동 코드로 목록 거르기, 인기 노선
     const list = (await api('GET', `/commutes?from=${YEOKSAM1}&to=${SEOGYO}`)).body.commutes;
     assert.ok(list.length >= 1 && list.every((x) => x.origin.code === YEOKSAM1 && x.destination.code === SEOGYO));
@@ -123,7 +127,7 @@ describe('정기 노선', () => {
     const joined = await api('POST', `/commutes/${c.id}/join`, { token: woman.token });
     assert.equal(joined.status, 200);
     assert.equal(joined.body.commute.joined, true);
-    assert.equal(joined.body.commute.meetingPoint, '강남구 역삼1동', '만남 장소를 따로 안 정하면 출발 동');
+    assert.equal(joined.body.commute.meetingPoint, '역삼', '만남 장소를 따로 안 정하면 출발 거점');
     assert.equal((await api('POST', `/commutes/${c.id}/join`, { token: (await signup('female')).token })).status, 409, '정원 초과');
     // 만든 사람이 나가면 다음 멤버가 넘겨받음
     await api('POST', `/commutes/${c.id}/leave`, { token: owner.token });
@@ -196,8 +200,8 @@ describe('정기 노선', () => {
     assert.equal((await post(u, { days: [] })).status, 400);
     assert.equal((await post(u, { days: ['xyz'] })).status, 400);
     assert.equal((await post(u, { departTime: '25:00' })).status, 400);
-    assert.equal((await post(u, { to: YEOKSAM1 })).status, 400, '같은 동');
-    assert.equal((await post(u, { from: '0000000000' })).status, 400, '없는 동');
+    assert.equal((await post(u, { to: YEOKSAM1 })).status, 400, '같은 거점');
+    assert.equal((await post(u, { from: 'nowhere' })).status, 400, '없는 거점');
     assert.equal((await api('POST', '/commutes', { body: {} })).status, 401);
     assert.equal((await api('GET', '/commutes/99999')).status, 404);
   });

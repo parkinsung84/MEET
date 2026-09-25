@@ -323,12 +323,6 @@ button.ok { background: #16a34a; color: #fff; }
 .member-row .link { margin-left: auto; }
 .list-count { margin: 0 0 8px; font-size: .85rem; }
 
-/* 노선 고르기: 구 → 동 */
-.route-finder { position: relative; }
-.dong-picker { display: grid; gap: 6px; }
-.dong-picker .field-label { color: var(--muted); font-size: .9rem; font-weight: 600; }
-.dong-picker select { flex: 1; min-width: 0; }
-.route-finder .swap { justify-self: center; }
 .popular { display: grid; gap: 8px; }
 .popular-route { display: grid; gap: 2px; color: var(--ink); text-decoration: none; }
 .route.big { font-size: 1.25rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 6px 0; }
@@ -337,3 +331,16 @@ button.ok { background: #16a34a; color: #fff; }
 .small-link { font-size: .85rem; }
 p.small { font-size: .72rem; }
 .empty-chat { text-align: center; padding: 24px 0; }
+
+/* 추천 노선·거점 고르기 */
+.featured { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.featured-route { display: grid; gap: 4px; padding: 12px; color: var(--ink); text-decoration: none; margin: 0; }
+.featured-route .route { font-size: .98rem; }
+.featured-route .muted { font-size: .78rem; }
+.featured-route .chip { justify-self: start; font-size: .72rem; }
+.hub-chooser .step-head { justify-content: space-between; flex-wrap: wrap; }
+.hub-group { display: grid; gap: 6px; }
+.hub-group-name { font-size: .8rem; font-weight: 700; color: var(--muted); }
+.hub-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hub-chip { padding: 8px 12px; border-radius: 999px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); font-weight: 600; font-size: .9rem; }
+.hub-chip.on, .hub-chip:disabled { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); opacity: 1; }
