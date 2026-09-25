@@ -322,6 +322,10 @@ const COLUMNS = {
     taxi_recorded_at: 'TEXT',
     taxi_type: "TEXT NOT NULL DEFAULT 'standard'", // (사용 안 함 — 예전 택시 종류 구분)
   },
+  commutes: {
+    origin_code: 'TEXT',             // 서울 행정동 코드 (미리 깔린 노선: 출발 동 → 도착 동)
+    dest_code: 'TEXT',
+  },
   ride_members: {
     dropoff_name: 'TEXT',            // 가는 길에 먼저 내리는 경우 하차 지점 (NULL = 최종 도착지)
     dropoff_lat: 'REAL',
@@ -342,6 +346,7 @@ function migrate(db) {
   }
   // 인증된 휴대폰 번호 하나당 계정 하나
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verified_phone ON users(phone) WHERE phone_verified = 1');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_commutes_route ON commutes(origin_code, dest_code)');
   // 본인확인된 사람 한 명당 계정 하나
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_identity_key ON users(identity_key) WHERE identity_key IS NOT NULL');
 }

@@ -1,10 +1,12 @@
 import { transaction } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { getDong } from './dongs.js';
 import { estimateFare, haversineKm, splitFare } from './geo.js';
 
 /**
  * 정기 노선 (출퇴근 택시 크루).
- * "분당 → 강남, 월~금 08:00"처럼 요일·시각을 정해 올리면 같은 길을 가는 사람들이 보고 참여한다.
+ * 서울 행정동 427개 사이의 "출발 동 → 도착 동" 노선이 미리 깔려 있고, 그 노선에서 요일·시각을 정한 크루를
+ * 만들거나 참여한다 (예: 강남구 역삼1동 → 종로구 종로1·2·3·4가동, 월~금 08:00).
  * 노선 목록·상세는 로그인 없이도 볼 수 있어 링크로 퍼뜨릴 수 있고, 정확한 출발 위치·만남 장소는 멤버에게만 보인다.
  * 운행하는 날에는 출발 1시간 전에 멤버들로 합승방을 자동으로 연다 (못 타는 사람은 그 합승방에서 나가면 된다)
  * → 체크인·차량번호·정산·긴급신고 등 기존 합승 기능을 그대로 쓴다.
@@ -63,22 +65,11 @@ export function nextRun(days, time, now = Date.now()) {
   return null;
 }
 
-/** 주소에서 공개용 대략적 위치: "경기도 성남시 분당구 정자동 178-1" → "분당구 정자동" */
-export function areaLabel(place) {
-  const tokens = String(place.address ?? '').split(/\s+/)
-    .filter((t) => /(시|군|구|읍|면|동|가|리)$/.test(t) && !/(도|특별시|광역시|특별자치시|특별자치도)$/.test(t));
-  return tokens.length ? tokens.slice(-2).join(' ') : place.name;
-}
-
-function requirePlace(p, label) {
-  if (!p || typeof p !== 'object') throw badRequest(`${label}를 선택해 주세요.`);
-  const lat = Number(p.lat);
-  const lng = Number(p.lng);
-  const name = typeof p.name === 'string' ? p.name.trim().slice(0, 100) : '';
-  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    throw badRequest(`${label}가 올바르지 않습니다.`);
-  }
-  return { name, lat, lng, address: typeof p.address === 'string' ? p.address.slice(0, 200) : '' };
+/** 서울 행정동 코드 → 동 (없으면 400) */
+function requireDong(code, label) {
+  const dong = getDong(code);
+  if (!dong) throw badRequest(`${label} 동을 골라 주세요.`);
+  return dong;
 }
 
 function parseDays(input) {
@@ -104,9 +95,12 @@ const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
  */
 export function createCommuteService(db, { rides, users, notifier, findRoute = null, locationLog = null, log = console }) {
   const stmt = {
-    insert: db.prepare(`INSERT INTO commutes (owner_id, origin_name, origin_lat, origin_lng, origin_area, dest_name, dest_lat, dest_lng,
-      dest_area, days, depart_time, max_seats, gender_pref, meeting_point, memo, distance_km, taxi_fare)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insert: db.prepare(`INSERT INTO commutes (owner_id, origin_name, origin_lat, origin_lng, origin_area, origin_code, dest_name, dest_lat, dest_lng,
+      dest_area, dest_code, days, depart_time, max_seats, gender_pref, meeting_point, memo, distance_km, taxi_fare)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    popular: db.prepare(`SELECT c.origin_code AS "from", c.dest_code AS "to", COUNT(DISTINCT c.id) AS crews, COUNT(m.user_id) AS riders
+      FROM commutes c JOIN commute_members m ON m.commute_id = c.id
+      WHERE c.status = 'open' AND c.origin_code IS NOT NULL GROUP BY c.origin_code, c.dest_code ORDER BY riders DESC, crews DESC LIMIT ?`),
     byId: db.prepare('SELECT * FROM commutes WHERE id = ?'),
     open: db.prepare(`SELECT * FROM commutes WHERE status = 'open' ORDER BY id DESC LIMIT 500`),
     update: db.prepare(`UPDATE commutes SET days = ?, depart_time = ?, max_seats = ?, gender_pref = ?, meeting_point = ?, memo = ?,
@@ -176,8 +170,8 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     const isMember = viewerId != null && members.some((m) => m.id === viewerId);
     const out = {
       id: c.id,
-      origin: { area: c.origin_area },
-      destination: { area: c.dest_area },
+      origin: { area: c.origin_area, code: c.origin_code },
+      destination: { area: c.dest_area, code: c.dest_code },
       days: DAY_ORDER.filter((k) => c.days & DAY_BITS[k]),
       daysLabel: daysLabel(c.days),
       departTime: c.depart_time,
@@ -238,9 +232,9 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     /** 노선 올리기 → 만든 사람이 첫 멤버 */
     async create(ownerId, input = {}) {
       users.requireVerified(ownerId);
-      const origin = requirePlace(input.origin, '출발지');
-      const destination = requirePlace(input.destination, '도착지');
-      if (haversineKm(origin.lat, origin.lng, destination.lat, destination.lng) < 0.5) throw badRequest('출발지와 도착지가 너무 가까워요.');
+      const origin = requireDong(input.from, '출발');
+      const destination = requireDong(input.to, '도착');
+      if (origin.code === destination.code) throw badRequest('출발 동과 도착 동이 같아요.');
       const days = parseDays(input.days);
       const time = parseTime(input.departTime);
       const maxSeats = Number(input.maxSeats ?? 4);
@@ -253,13 +247,13 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
 
       const route = findRoute ? await findRoute(origin, destination) : null;
       const id = transaction(db, () => {
-        const { lastInsertRowid } = stmt.insert.run(ownerId, origin.name, origin.lat, origin.lng, areaLabel(origin),
-          destination.name, destination.lat, destination.lng, areaLabel(destination), days, time, maxSeats, genderPref,
+        const { lastInsertRowid } = stmt.insert.run(ownerId, origin.name, origin.lat, origin.lng, origin.name, origin.code,
+          destination.name, destination.lat, destination.lng, destination.name, destination.code, days, time, maxSeats, genderPref,
           text(input.meetingPoint, 100), text(input.memo, 300), route?.distanceKm ?? null, route?.taxiFare ?? null);
         stmt.addMember.run(lastInsertRowid, ownerId);
         return Number(lastInsertRowid);
       });
-      locationLog?.record(ownerId, { action: 'commute_create', purpose: '정기 노선 등록 — 출발지·도착지 저장, 대략적 지역은 누구나 볼 수 있게 공개' });
+      locationLog?.record(ownerId, { action: 'commute_create', purpose: '정기 노선 크루 만들기 — 출발·도착 동을 누구나 볼 수 있게 공개' });
       return service.get(id, ownerId);
     },
 
@@ -269,7 +263,8 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
      * nearLat/nearLng 는 거르지 않고 출발지가 가까운 순으로 정렬만 한다.
      */
     search(query = {}, viewerId = null) {
-      const list = stmt.open.all().filter((c) => nearEnough(c, query));
+      const list = stmt.open.all().filter((c) => nearEnough(c, query)
+        && (!query.from || c.origin_code === String(query.from)) && (!query.to || c.dest_code === String(query.to)));
       const near = query.nearLat != null ? { lat: Number(query.nearLat), lng: Number(query.nearLng) } : null;
       const score = (c) => (query.originLat != null ? haversineKm(Number(query.originLat), Number(query.originLng), c.origin_lat, c.origin_lng) : 0)
         + (query.destLat != null ? haversineKm(Number(query.destLat), Number(query.destLng), c.dest_lat, c.dest_lng) : 0)
@@ -283,6 +278,39 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
 
     get(id, viewerId = null) {
       return serialize(load(id), { viewerId, detail: true });
+    },
+
+    /**
+     * 미리 깔린 노선 (출발 동 → 도착 동): 이 노선의 크루들(출발 시각 순)과,
+     * 양 끝이 1.5km 안인 이웃 동 노선의 크루(같이 타기 괜찮은 경우)를 함께 보여준다.
+     */
+    route(fromCode, toCode, viewerId = null) {
+      const from = requireDong(fromCode, '출발');
+      const to = requireDong(toCode, '도착');
+      if (from.code === to.code) throw badRequest('출발 동과 도착 동이 같아요.');
+      const { fare, distanceKm } = estimateFare(from.lat, from.lng, to.lat, to.lng);
+      const open = stmt.open.all();
+      const exact = open.filter((c) => c.origin_code === from.code && c.dest_code === to.code);
+      const nearby = open.filter((c) => !(c.origin_code === from.code && c.dest_code === to.code)
+        && haversineKm(from.lat, from.lng, c.origin_lat, c.origin_lng) <= 1.5
+        && haversineKm(to.lat, to.lng, c.dest_lat, c.dest_lng) <= 1.5);
+      const byTime = (a, b) => a.depart_time.localeCompare(b.depart_time);
+      return {
+        from: { code: from.code, gu: from.gu, dong: from.dong },
+        to: { code: to.code, gu: to.gu, dong: to.dong },
+        distanceKm, fare: { total: fare, perPerson: splitFare(fare, 4) },
+        commutes: exact.sort(byTime).map((c) => serialize(c, { viewerId })),
+        nearby: nearby.sort(byTime).slice(0, 20).map((c) => serialize(c, { viewerId })),
+      };
+    },
+
+    /** 사람이 많이 모인 노선 */
+    popular(limit = 10) {
+      return stmt.popular.all(limit).map((r) => {
+        const from = getDong(r.from);
+        const to = getDong(r.to);
+        return from && to ? { from: { code: from.code, gu: from.gu, dong: from.dong }, to: { code: to.code, gu: to.gu, dong: to.dong }, crews: r.crews, riders: r.riders } : null;
+      }).filter(Boolean);
     },
 
     mine(userId) {

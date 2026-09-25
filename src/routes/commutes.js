@@ -11,6 +11,14 @@ export function commutesRouter({ commutes, auth, changed = () => {}, messagePost
     res.json({ commutes: commutes.search(req.query, req.userId) });
   });
 
+  // 미리 깔린 노선 (출발 동 → 도착 동)
+  router.get('/routes/popular', (req, res) => {
+    res.json({ routes: commutes.popular(Math.min(Number(req.query.limit) || 10, 50)) });
+  });
+  router.get('/routes/:from/:to', auth.optional, (req, res) => {
+    res.json({ route: commutes.route(req.params.from, req.params.to, req.userId) });
+  });
+
   router.get('/mine', auth.required, (req, res) => {
     res.json({ commutes: commutes.mine(req.userId) });
   });

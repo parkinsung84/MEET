@@ -322,3 +322,17 @@ button.ok { background: #16a34a; color: #fff; }
 .members li.member-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .member-row .link { margin-left: auto; }
 .list-count { margin: 0 0 8px; font-size: .85rem; }
+
+/* 노선 고르기: 구 → 동 */
+.route-finder { position: relative; }
+.dong-picker { display: grid; gap: 6px; }
+.dong-picker .field-label { color: var(--muted); font-size: .9rem; font-weight: 600; }
+.dong-picker select { flex: 1; min-width: 0; }
+.route-finder .swap { justify-self: center; }
+.popular { display: grid; gap: 8px; }
+.popular-route { display: grid; gap: 2px; color: var(--ink); text-decoration: none; }
+.route.big { font-size: 1.25rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 6px 0; }
+.route.big small { font-size: .8rem; color: var(--muted); font-weight: 600; }
+.route-head .row { margin-top: 10px; flex-wrap: wrap; }
+.small-link { font-size: .85rem; }
+p.small { font-size: .72rem; }

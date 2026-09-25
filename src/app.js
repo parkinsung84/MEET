@@ -110,20 +110,32 @@ export function createApp({
   // 노선 공유 링크: 카톡 등에서 미리보기(제목·설명)가 보이도록 노선 정보를 넣은 첫 화면을 준다
   const indexHtml = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8');
   const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+  const sendWithMeta = (res, title, desc) => {
+    const meta = title ? [
+      `<meta property="og:title" content="${escapeHtml(title)}">`,
+      `<meta property="og:description" content="${escapeHtml(desc)}">`,
+      '<meta property="og:type" content="website">',
+      `<meta name="description" content="${escapeHtml(desc)}">`,
+    ].join('\n  ') : '';
+    res.type('html').send(indexHtml.replace('</head>', `  ${meta}\n</head>`));
+  };
   app.get('/c/:id', (req, res) => {
-    let meta = '';
     try {
       const c = commutes.get(req.params.id);
-      const title = `${c.origin.area} → ${c.destination.area} ${c.daysLabel} ${c.departTime} 택시 같이 타요`;
-      const desc = `${c.seatsLeft ? `${c.seatsLeft}자리 남음` : '마감'} · 1인 약 ${c.fare.perPerson.toLocaleString('ko-KR')}원 · MEET 출퇴근 택시`;
-      meta = [
-        `<meta property="og:title" content="${escapeHtml(title)}">`,
-        `<meta property="og:description" content="${escapeHtml(desc)}">`,
-        '<meta property="og:type" content="website">',
-        `<meta name="description" content="${escapeHtml(desc)}">`,
-      ].join('\n  ');
-    } catch { /* 없는 노선이면 기본 화면 */ }
-    res.type('html').send(indexHtml.replace('</head>', `  ${meta}\n</head>`));
+      sendWithMeta(res, `${c.origin.area} → ${c.destination.area} ${c.daysLabel} ${c.departTime} 택시 같이 타요`,
+        `${c.seatsLeft ? `${c.seatsLeft}자리 남음` : '마감'} · 1인 약 ${c.fare.perPerson.toLocaleString('ko-KR')}원 · MEET 출퇴근 택시`);
+    } catch {
+      sendWithMeta(res); // 없는 노선이면 기본 화면
+    }
+  });
+  app.get('/r/:from/:to', (req, res) => {
+    try {
+      const r = commutes.route(req.params.from, req.params.to);
+      sendWithMeta(res, `${r.from.gu} ${r.from.dong} → ${r.to.gu} ${r.to.dong} 출퇴근 택시 같이 타요`,
+        `모집 중인 크루 ${r.commutes.length}개 · 4명이 타면 1인 약 ${r.fare.perPerson.toLocaleString('ko-KR')}원 · MEET`);
+    } catch {
+      sendWithMeta(res);
+    }
   });
   app.use(express.static(PUBLIC_DIR));
   app.get('/api/health', (req, res) => {
