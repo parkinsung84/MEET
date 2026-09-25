@@ -34,6 +34,16 @@ const showCodes = process.env.SHOW_VERIFICATION_CODES === '1';
 if (production && showCodes) {
   console.warn('[warn] SHOW_VERIFICATION_CODES=1: 인증번호가 화면에 표시됩니다. 비공개 시범 운영에서만 사용하세요.');
 }
+// 휴대폰 인증 필수 여부: REQUIRE_VERIFICATION=1 이면 필수, 0 이면 인증 없이 이용 가능,
+// 비워 두면 인증 수단(문자 SENS·본인확인·시범 운영 인증번호 표시)이 하나라도 준비됐을 때만 필수
+const canVerify = sms.configured || identity.enabled || showCodes || !production;
+const verificationRequired = process.env.REQUIRE_VERIFICATION === '1' ? true
+  : process.env.REQUIRE_VERIFICATION === '0' ? false
+    : canVerify;
+if (!verificationRequired) {
+  console.warn('[warn] 휴대폰 인증 없이 합승을 이용할 수 있습니다 (인증 수단 미설정 또는 REQUIRE_VERIFICATION=0). 공개 운영 전에 SENS 또는 본인확인을 설정하세요.');
+}
+
 const { server, db, startScheduler } = createApp({
   dbPath: process.env.DB_PATH || 'meet.db',
   secret,
@@ -41,6 +51,7 @@ const { server, db, startScheduler } = createApp({
   mailer,
   sms,
   identity,
+  verificationRequired,
   // 운영 환경에서는 절대 인증번호를 응답에 넣지 않는다
   exposeDevCode: !production || showCodes,
   production,

@@ -1,5 +1,5 @@
 import { placePicker, reverseGeocode, rideCard, timePicker } from '../components.js';
-import { api, formatTime, listen, relativeTime, state } from '../core.js';
+import { api, canUseRides, formatTime, listen, relativeTime, state } from '../core.js';
 import { mapProblem, renderRidesMap } from '../maps.js';
 import { h, sheet, toast } from '../ui.js';
 
@@ -249,7 +249,7 @@ export function homeScreen() {
   listen(window, 'rides:changed', () => banner.refresh());
 
   return h('div', {},
-    !state.user.verified && h('a', { class: 'card banner warn', href: '#/verify' },
+    !canUseRides() && h('a', { class: 'card banner warn', href: '#/verify' },
       h('strong', {}, '📱 휴대폰 본인 확인이 필요해요'), h('div', {}, '확인을 마치면 합승을 만들고 참여할 수 있어요.')),
     banner,
     upcomingBanner(),

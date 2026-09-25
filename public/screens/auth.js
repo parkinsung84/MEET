@@ -1,4 +1,4 @@
-import { api, refreshMe, setSession, state } from '../core.js';
+import { api, canUseRides, refreshMe, setSession, state } from '../core.js';
 import { startIdentityVerification } from '../identity.js';
 import { h, toast } from '../ui.js';
 
@@ -109,7 +109,7 @@ export function authScreen() {
         const { token, user, devCode } = await api('POST', `/auth/${mode}`, data);
         setSession(token, user);
         if (devCode) sessionStorage.setItem('meet.devCode', devCode);
-        location.hash = user.verified ? '#/' : '#/verify';
+        location.hash = canUseRides() ? '#/' : '#/verify';
       } catch (err) {
         toast(err.message);
       }

@@ -229,7 +229,7 @@ export function profileScreen() {
         h('div', { class: 'muted' }, user.email),
         h('div', { class: 'chips' }, trustChips(user)),
         user.identityComplete && h('div', { class: 'muted' }, `${user.name} · ${user.birthDate} · ${user.phone} (나만 보여요)`),
-        !user.verified && h('a', { class: 'btn', href: '#/verify' }, '휴대폰 본인 확인하기'),
+        !user.verified && state.config.verificationRequired !== false && h('a', { class: 'btn', href: '#/verify' }, '휴대폰 본인 확인하기'),
         h('div', { class: 'fare' },
           h('div', {}, h('span', { class: 'muted' }, '완료한 합승'), h('strong', {}, `${s.completedRides}회`)),
           h('div', {}, h('span', { class: 'muted' }, '매너 점수'), h('strong', {}, s.mannerPercent === null ? '-' : `${s.mannerPercent}%`)),

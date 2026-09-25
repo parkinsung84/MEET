@@ -1,6 +1,6 @@
 import { startCall } from '../call.js';
 import { genderChip, placePicker, routeSummary, savingsLine, trustChips } from '../components.js';
-import { api, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, SEAT_LABEL, state, STATUS_LABEL, won } from '../core.js';
+import { api, canUseRides, emit, formatTime, GENDER_LABEL, listen, minutesUntil, onLeave, relativeTime, SEAT_LABEL, state, STATUS_LABEL, won } from '../core.js';
 import { mapsAvailable, renderRouteMap } from '../maps.js';
 import { ask, copyText, h, sheet, toast } from '../ui.js';
 
@@ -78,7 +78,7 @@ export function rideScreen(rideId) {
     messages.forEach((m) => appendInquiry(inquiryLog, m));
   }
 
-  const canInquire = () => !isMember() && ride.status === 'open' && state.user.verified;
+  const canInquire = () => !isMember() && ride.status === 'open' && canUseRides();
   // 입력 중인 글이 다시 그리기로 지워지지 않도록 카드는 한 번만 만들어 재사용한다
   let inquiryInput = null;
   let guestCard = null;
@@ -337,7 +337,7 @@ export function rideScreen(rideId) {
     if (ride.status === 'cancelled') return h('div', { class: 'card step muted' }, '취소된 합승이에요.');
     if (ride.status === 'open' && !isMember()) {
       const full = ride.memberCount >= ride.maxSeats;
-      if (!state.user.verified) return h('a', { class: 'card step warn', href: '#/verify' }, '📱 휴대폰 본인 확인 후 참여할 수 있어요.');
+      if (!canUseRides()) return h('a', { class: 'card step warn', href: '#/verify' }, '📱 휴대폰 본인 확인 후 참여할 수 있어요.');
       return h('div', { class: 'card step' },
         h('div', { class: 'row' },
           h('button', { class: 'secondary', onclick: () => { inquiryInput?.focus(); inquiryInput?.scrollIntoView({ block: 'center' }); } }, '💬 먼저 물어보기'),

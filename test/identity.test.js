@@ -157,3 +157,35 @@ describe('포트원 본인인증 조회', () => {
     assert.deepEqual(on.publicConfig, { provider: 'portone', storeId: 's', channelKey: 'c' });
   });
 });
+
+describe('휴대폰 인증 없이 이용 (시범 운영)', () => {
+  test('verificationRequired=false 면 인증 전에도 합승을 만들고 참여할 수 있다', async () => {
+    const { server: s } = createApp({ secret: 'open-secret', push: null, verificationRequired: false, authLimits: relaxedLimits() });
+    await new Promise((resolve) => s.listen(0, resolve));
+    const url = `http://localhost:${s.address().port}/api`;
+    const call = async (method, path, token, body) => {
+      const res = await fetch(`${url}${path}`, {
+        method, headers: { 'content-type': 'application/json', ...(token && { authorization: `Bearer ${token}` }) }, body: body && JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json() };
+    };
+    try {
+      assert.equal((await call('GET', '/config')).body.verificationRequired, false);
+      const reg = (n) => call('POST', '/auth/register', null, {
+        email: `open${n}@test.com`, password: 'password123', nickname: `열림${n}`, gender: 'male',
+        name: '홍길동', birthDate: '1990-01-01', phone: `0109999000${n}`, agreements: AGREE_ALL,
+      });
+      const host = (await reg(1)).body;
+      assert.equal(host.user.verified, false);
+      const ride = await call('POST', '/rides', host.token, {
+        origin: { name: '서울역', lat: 37.5547, lng: 126.9707 }, destination: { name: '강남역', lat: 37.4979, lng: 127.0276 },
+        departAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      assert.equal(ride.status, 201, JSON.stringify(ride.body));
+      const guest = (await reg(2)).body;
+      assert.equal((await call('POST', `/rides/${ride.body.ride.id}/join`, guest.token, {})).status, 200);
+    } finally {
+      await new Promise((resolve) => s.close(resolve));
+    }
+  });
+});

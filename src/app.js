@@ -38,6 +38,8 @@ export function createApp({
   mailer = createMailer({}, { info() {} }),
   sms = createSmsSender({}, { log: { info() {} } }),
   identity = { enabled: false, publicConfig: null },
+  // false 면 휴대폰 인증 없이 이용 가능 (시범 운영)
+  verificationRequired = true,
   push,
   exposeDevCode = true,
   callRingTimeoutMs,
@@ -50,7 +52,7 @@ export function createApp({
   const auth = createAuth(db, secret);
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
-  const users = createUserService(db, { secret, mailer, sms, identity, exposeDevCode });
+  const users = createUserService(db, { secret, mailer, sms, identity, exposeDevCode, verificationRequired });
   const locationLog = createLocationLog(db);
   const rides = createRideService(db, {
     users,
@@ -110,6 +112,7 @@ export function createApp({
     sms: { ready: sms.configured, showCodes: exposeDevCode && !sms.configured },
     // 휴대폰 본인확인(PASS) — 있으면 문자 인증 대신 사용
     identity: identity.publicConfig,
+    verificationRequired,
   }));
   app.use('/api/auth', authRouter(db, auth, users, account, authLimits));
   // 위치정보 이용·제공 사실 확인자료 열람 (본인)

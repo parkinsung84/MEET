@@ -55,8 +55,11 @@ export const orgDomainOf = (email) => {
 
 /**
  * identity: 본인확인 업체 연동 (src/identity.js). 켜져 있으면 문자 인증 대신 본인확인으로만 인증한다.
+ * verificationRequired: false 면 휴대폰 인증 없이도 합승을 이용할 수 있다 (인증 수단이 준비되기 전 시범 운영용).
  */
-export function createUserService(db, { secret, mailer, sms, identity = { enabled: false }, exposeDevCode = false }) {
+export function createUserService(db, {
+  secret, mailer, sms, identity = { enabled: false }, exposeDevCode = false, verificationRequired = true,
+}) {
   const stmt = {
     byId: db.prepare('SELECT * FROM users WHERE id = ?'),
     completedRides: db.prepare(`
@@ -152,6 +155,7 @@ export function createUserService(db, { secret, mailer, sms, identity = { enable
     stats,
     /** 본인확인 업체 연동 여부 (켜져 있으면 가입 시 본인정보 입력·문자 인증 대신 본인확인) */
     identityEnabled: identity.enabled,
+    verificationRequired,
 
     /** 본인에게 보여주는 정보 */
     me(userId) {
@@ -196,7 +200,7 @@ export function createUserService(db, { secret, mailer, sms, identity = { enable
     },
 
     requireVerified(userId) {
-      if (!load(userId).phone_verified) throw forbidden('휴대폰 본인 확인 후 이용할 수 있어요.');
+      if (verificationRequired && !load(userId).phone_verified) throw forbidden('휴대폰 본인 확인 후 이용할 수 있어요.');
       if (missingConsents(userId).length) throw forbidden('바뀐 약관에 동의한 뒤 이용할 수 있어요.');
     },
 

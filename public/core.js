@@ -52,6 +52,9 @@ export function setSession(token, user) {
   connectSocket();
 }
 
+/** 합승을 만들고 참여할 수 있는지 (휴대폰 인증 완료, 또는 운영자가 인증을 잠시 꺼 둔 경우) */
+export const canUseRides = () => Boolean(state.user?.verified) || state.config.verificationRequired === false;
+
 export async function refreshMe() {
   ({ user: state.user } = await api('GET', '/auth/me'));
   return state.user;
