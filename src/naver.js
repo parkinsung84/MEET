@@ -8,6 +8,8 @@
  * 키가 없는 기능은 비활성화되며, 호출하는 쪽에서 대체 동작을 한다.
  */
 
+import { matchStations, normalizeName, rankByName } from './place-match.js';
+
 const DEFAULT_MAPS_BASE_URL = 'https://maps.apigw.ntruss.com';
 const DEFAULT_OPENAPI_BASE_URL = 'https://openapi.naver.com';
 const DEFAULT_APIHUB_BASE_URL = 'https://naverapihub.apigw.ntruss.com';
@@ -60,6 +62,8 @@ export function createNaverClient({
   const legacySearchEnabled = Boolean(searchClientId && searchClientSecret);
   const searchEnabled = hubEnabled || legacySearchEnabled;
   const cache = createCache();
+  // 역 위치는 잘 바뀌지 않으므로 서버가 켜져 있는 동안 기억한다 (역 이름 목록 크기로 제한됨)
+  const stationCache = new Map();
 
   async function getJson(url, headers) {
     let res;
@@ -112,6 +116,16 @@ export function createNaverClient({
     }));
   }
 
+  /** 역 이름 → 네이버 검색으로 찾은 그 역 (없으면 null) */
+  async function stationPlace(name) {
+    if (stationCache.has(name)) return stationCache.get(name);
+    const want = `${name}역`;
+    const found = (await localSearch(want)).find((p) => p.name.replace(/\s+/g, '').startsWith(want)) ?? null;
+    const place = found && { ...found, name: want };
+    stationCache.set(name, place);
+    return place;
+  }
+
   /** 주소 검색: "테헤란로 152", "분당구 불정로 6" 등 */
   async function geocode(query) {
     const url = `${mapsBaseUrl}/map-geocode/v2/geocode?${new URLSearchParams({ query })}`;
@@ -148,11 +162,17 @@ export function createNaverClient({
         const tasks = [];
         if (searchEnabled) tasks.push(localSearch(q));
         if (mapsEnabled) tasks.push(geocode(q));
-        const settled = await Promise.allSettled(tasks);
-        if (settled.length && settled.every((s) => s.status === 'rejected')) throw settled[0].reason;
+        // "동대"처럼 역 이름 앞부분만 쳐도 동대구역·동대문역이 먼저 나오도록 (네이버 검색은 앞부분 일치를 잘 못 찾는다)
+        const stationTask = searchEnabled
+          ? Promise.allSettled(matchStations(q).map(stationPlace))
+            .then((rs) => rs.flatMap((r) => (r.status === 'fulfilled' && r.value ? [r.value] : [])))
+          : Promise.resolve([]);
+        const [settled, stations] = await Promise.all([Promise.allSettled(tasks), stationTask]);
+        if (!stations.length && settled.length && settled.every((s) => s.status === 'rejected')) throw settled[0].reason;
+        const found = settled.flatMap((s) => (s.status === 'fulfilled' ? s.value : []));
         const seen = new Set();
-        return settled
-          .flatMap((s) => (s.status === 'fulfilled' ? s.value : []))
+        const seenStations = new Set(stations.map((p) => normalizeName(p.name)));
+        return [...stations, ...rankByName(found, q).filter((p) => !seenStations.has(normalizeName(p.name)))]
           .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && p.name)
           .filter((p) => {
             const key = `${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`;

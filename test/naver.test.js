@@ -98,11 +98,29 @@ test('API HUB 키가 있으면 새 주소·헤더로 장소 검색', async () =>
 test('API HUB가 실패하면 예전 검색 키로 대체', async () => {
   const { fetch, calls } = fakeFetch({
     '/search/v1/local': () => [401, { error: 'unauthorized' }],
-    '/v1/search/local.json': () => [200, { items: [{ title: '강남역', address: '서울', mapx: '1270276000', mapy: '374979000' }] }],
+    '/v1/search/local.json': () => [200, { items: [{ title: '스타벅스 역삼점', address: '서울', mapx: '1270276000', mapy: '374979000' }] }],
   });
-  const places = await createNaverClient({ apiHubKeyId: 'h', apiHubKey: 'x', searchClientId: 'sid', searchClientSecret: 's', fetch }).searchPlaces('강남역');
-  assert.equal(places[0].name, '강남역');
+  const places = await createNaverClient({ apiHubKeyId: 'h', apiHubKey: 'x', searchClientId: 'sid', searchClientSecret: 's', fetch }).searchPlaces('스타벅스');
+  assert.equal(places[0].name, '스타벅스 역삼점');
   assert.deepEqual(calls.map((c) => c.path), ['/search/v1/local', '/v1/search/local.json']);
+});
+
+test('역 이름 앞부분만 쳐도 그 역이 먼저 나온다 (입력 중인 받침까지)', async () => {
+  const items = {
+    동대: [{ title: '동국대학교 서울캠퍼스', category: '대학교', address: '서울 중구', mapx: '1269990000', mapy: '375580000' }],
+    동대구역: [{ title: '<b>동대구역</b>', category: '기차역', address: '대구 동구', mapx: '1286286000', mapy: '358793000' }],
+    동대문역: [{ title: '동대문역 1호선', category: '지하철역', address: '서울 종로구', mapx: '1270099000', mapy: '375714000' }],
+    동대입구역: [{ title: '동대입구역 3호선', category: '지하철역', address: '서울 중구', mapx: '1270055000', mapy: '375590000' }],
+    동댁: [],
+  };
+  const { fetch, calls } = fakeFetch({ '/search/v1/local': (p) => [200, { items: items[p.get('query')] ?? [] }] });
+  const naver = createNaverClient({ apiHubKeyId: 'h', apiHubKey: 'k', fetch });
+  const names = (await naver.searchPlaces('동대')).map((p) => p.name);
+  assert.deepEqual(names, ['동대구역', '동대문역', '동대입구역', '동국대학교 서울캠퍼스']);
+  // "동대구"를 치는 중 "동댁" 이 입력돼도 동대구역
+  assert.equal((await naver.searchPlaces('동댁'))[0].name, '동대구역');
+  // 역 위치는 한 번 찾으면 기억
+  assert.equal(calls.filter((c) => c.params.query === '동대구역').length, 1);
 });
 
 test('reverseGeocode: 도로명 주소와 건물명을 돌려준다', async () => {
