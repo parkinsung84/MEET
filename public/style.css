@@ -104,6 +104,7 @@ button:disabled { opacity: .5; cursor: default; }
 .suggestions li span { font-size: .8rem; }
 .map-card { padding: 0; overflow: hidden; }
 .route-map { height: 240px; }
+.rides-map { height: 280px; }
 .map-label {
   padding: 3px 8px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 700;
   white-space: nowrap; box-shadow: 0 2px 6px rgb(0 0 0 / .3);

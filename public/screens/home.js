@@ -1,5 +1,6 @@
 import { placePicker, rideCard, toLocalInput } from '../components.js';
 import { api, formatTime, listen, relativeTime, state } from '../core.js';
+import { renderRidesMap } from '../maps.js';
 import { h, toast } from '../ui.js';
 
 const NOW_WINDOW_MIN = 30;   // '지금 바로': 30분 안에 출발
@@ -75,6 +76,19 @@ export function homeScreen() {
     [1, 2, 3, 5].map((km) => h('option', { value: km, selected: km === (prev.radiusKm ?? 2) }, `반경 ${km}km`)));
   const modeTabs = h('div', { class: 'tabs' });
   const list = h('div');
+  // 검색 결과를 지도에 핀으로 (네이버 지도 키가 있을 때만 보임)
+  const mapEl = h('div', { class: 'rides-map' });
+  const mapCard = h('div', { class: 'card map-card needs-map', hidden: true }, mapEl);
+  let ridesMap = null;
+  async function showMap(rides, me) {
+    if (!(await state.mapsReady)) return;
+    ridesMap?.destroy();
+    mapCard.hidden = false;
+    ridesMap = renderRidesMap(mapEl, rides, {
+      me,
+      label: (r) => `${new Date(r.departAt).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })} · ${r.memberCount}/${r.maxSeats}명`,
+    });
+  }
 
   function renderTabs() {
     modeTabs.replaceChildren(
@@ -174,6 +188,7 @@ export function homeScreen() {
       if (o) params.set('originLat', o.lat), params.set('originLng', o.lng);
       if (d) params.set('destLat', d.lat), params.set('destLng', d.lng);
       const { rides, demand } = await api('GET', `/rides?${params}`);
+      showMap(rides, o);
       list.replaceChildren(h('div', {},
         h('h2', {}, `${mode === 'now' ? `${NOW_WINDOW_MIN}분 안에 출발하는` : '그 시간대'} 합승 ${rides.length}건`),
         demand > 0 && h('div', { class: 'demand' }, `👀 지금 이 경로를 ${demand}명이 찾고 있어요 — 자동 매칭을 신청하면 바로 연결돼요`),
@@ -201,6 +216,7 @@ export function homeScreen() {
     banner,
     upcomingBanner(),
     form,
+    mapCard,
     list,
     h('a', { class: 'btn fab', href: '#/new' }, '+ 합승방 만들기'),
   );

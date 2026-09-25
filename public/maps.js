@@ -76,6 +76,38 @@ export function renderRouteMap(container, ride) {
   return map;
 }
 
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * 합승방 지도: 각 방의 출발지에 핀(라벨 = label(ride))을 찍고, 누르면 그 방으로 이동.
+ * me가 있으면 내 출발지도 표시. 방이 없으면 me(또는 서울시청) 주변을 보여준다.
+ */
+export function renderRidesMap(container, rides, { me, label }) {
+  if (!mapsAvailable()) return null;
+  const map = new naver.maps.Map(container, {
+    center: latLng(me ?? rides[0]?.origin ?? DEFAULT_CENTER),
+    zoom: 14,
+    scaleControl: false,
+    mapDataControl: false,
+  });
+  const points = [];
+  if (me) {
+    labelMarker(map, me, '내 출발지', '#2563eb');
+    points.push(latLng(me));
+  }
+  for (const ride of rides) {
+    const marker = labelMarker(map, ride.origin, escapeHtml(label(ride)), ride.memberCount >= ride.maxSeats ? '#6b7280' : '#16a34a');
+    naver.maps.Event.addListener(marker, 'click', () => { location.hash = `#/rides/${ride.id}`; });
+    points.push(latLng(ride.origin));
+  }
+  if (points.length > 1) {
+    const bounds = new naver.maps.LatLngBounds(points[0], points[0]);
+    points.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, { top: 50, right: 40, bottom: 30, left: 40 });
+  }
+  return map;
+}
+
 /**
  * 지도에서 위치 고르기 (가운데 핀 방식). 지도를 움직이면 가운데 좌표의 주소를 보여준다.
  * reverse(lat, lng) → Promise<{ name, address, lat, lng }>
