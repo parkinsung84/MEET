@@ -87,6 +87,7 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `JWT_SECRET` | 토큰 서명 키. 운영 환경에서는 반드시 설정 |
 | `NODE_ENV` | `production` 이면 개발용 인증번호 화면 노출이 꺼짐 (운영 필수) |
 | `NCP_ACCESS_KEY` / `NCP_SECRET_KEY` / `NCP_SENS_SERVICE_ID` / `SMS_FROM` | 휴대폰 인증문자 발송 (네이버 클라우드 SENS). **없으면 인증번호를 서버 콘솔에 출력**하고, 개발 모드에서는 화면에도 보여줌 |
+| `PORTONE_STORE_ID` / `PORTONE_CHANNEL_KEY` / `PORTONE_API_SECRET` | 휴대폰 본인확인(PASS 등, 포트원 V2). 설정하면 문자 인증 대신 본인확인으로 실명·생년월일·성별·번호를 확정 (CI/DI 해시로 1인 1계정) |
 | `DEMO_LOGIN_EMAIL` / `DEMO_LOGIN_PASSWORD` | 운영자 체험 계정 — 서버 시작 때 가입·문자 인증 없이 로그인 가능한 계정을 만들거나 비밀번호 갱신 (선택: `DEMO_LOGIN_GENDER`, `DEMO_LOGIN_NICKNAME`) |
 | `SHOW_VERIFICATION_CODES` | `1` 이면 운영 모드에서도 인증번호를 화면에 표시 — SENS 준비 전 **비공개 시범 운영 전용** |
 | `SMTP_URL` / `MAIL_FROM` | 소속(학교·회사) 인증 메일 발송용 SMTP. 없으면 콘솔 출력 |

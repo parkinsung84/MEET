@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomInt } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 import { CONSENT_KINDS, CONSENTS } from './legal.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
 
@@ -15,6 +15,7 @@ const MIN_RATINGS_FOR_SCORE = 3;
 const WITHDRAWN_RECORD_MS = 365 * 24 * 3600 * 1000; // 탈퇴 후 노쇼 기록 보관 기간
 const MAX_SMS_PER_DAY = 5;        // 번호별 하루 인증문자 발송 한도
 const MAX_SMS_PER_USER_DAY = 10;  // 계정별 하루 한도 (번호를 바꿔 가며 보내는 것 방지)
+const IDENTITY_TTL_MS = 30 * 60 * 1000; // 본인확인 요청 유효시간
 export const MIN_AGE = 19;        // 모르는 사람과 타는 서비스이므로 성인만 가입 (민법상 성년)
 
 const NAME_RE = /^[가-힣a-zA-Z][가-힣a-zA-Z\s]{0,18}[가-힣a-zA-Z]$/;
@@ -52,7 +53,10 @@ export const orgDomainOf = (email) => {
   return domain && !PUBLIC_EMAIL_DOMAINS.has(domain) ? domain : null;
 };
 
-export function createUserService(db, { secret, mailer, sms, exposeDevCode = false }) {
+/**
+ * identity: 본인확인 업체 연동 (src/identity.js). 켜져 있으면 문자 인증 대신 본인확인으로만 인증한다.
+ */
+export function createUserService(db, { secret, mailer, sms, identity = { enabled: false }, exposeDevCode = false }) {
   const stmt = {
     byId: db.prepare('SELECT * FROM users WHERE id = ?'),
     completedRides: db.prepare(`
@@ -72,7 +76,13 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
       VALUES (?, ?, ?, ?, 0, ?)`),
     bumpPhoneAttempts: db.prepare('UPDATE phone_verifications SET attempts = attempts + 1 WHERE user_id = ?'),
     deletePhoneVerification: db.prepare('DELETE FROM phone_verifications WHERE user_id = ?'),
-    markPhoneVerified: db.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?'),
+    markPhoneVerified: db.prepare("UPDATE users SET phone_verified = 1, identity_method = 'sms', identity_verified_at = ? WHERE id = ?"),
+    putIdentityRequest: db.prepare('INSERT INTO identity_verifications (id, user_id, created_at) VALUES (?, ?, ?)'),
+    getIdentityRequest: db.prepare('SELECT * FROM identity_verifications WHERE id = ?'),
+    useIdentityRequest: db.prepare('UPDATE identity_verifications SET used_at = ? WHERE id = ? AND used_at IS NULL'),
+    identityTaken: db.prepare('SELECT id FROM users WHERE identity_key = ? AND id != ?'),
+    markIdentityVerified: db.prepare(`UPDATE users SET real_name = ?, birth_date = ?, gender = ?, phone = ?,
+      phone_verified = 1, identity_key = ?, identity_method = 'pass', identity_verified_at = ? WHERE id = ?`),
     consents: db.prepare('SELECT kind, version FROM user_consents WHERE user_id = ?'),
     putConsent: db.prepare(`INSERT INTO user_consents (user_id, kind, version, agreed_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(user_id, kind) DO UPDATE SET version = excluded.version, agreed_at = excluded.agreed_at`),
@@ -102,6 +112,16 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
   const newCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0');
   /** 휴대폰 번호 해시 (탈퇴자 기록 대조용 — 번호 자체는 저장하지 않음) */
   const phoneHash = (phone) => createHmac('sha256', secret).update(`phone:${phone}`).digest('hex');
+  const identityKeyHash = (key) => createHmac('sha256', secret).update(`identity:${key}`).digest('hex');
+  const requirePassInstead = () => {
+    if (identity.enabled) throw badRequest('휴대폰 본인확인(PASS)으로 인증해 주세요.');
+  };
+
+  /** 1년 안에 탈퇴한 같은 번호의 노쇼·직전취소 기록을 이어받는다 (재가입으로 기록 세탁 방지) */
+  function restoreWithdrawnRecord(userId, phone) {
+    const prev = stmt.withdrawnRecord.get(phoneHash(phone), new Date(Date.now() - WITHDRAWN_RECORD_MS).toISOString());
+    if (prev.noShows || prev.lateCancels) stmt.restoreCounts.run(prev.noShows ?? 0, prev.lateCancels ?? 0, userId);
+  }
 
   /** 아직 동의하지 않았거나 약관 버전이 바뀐 동의 항목 */
   function missingConsents(userId) {
@@ -130,6 +150,8 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
 
   const service = {
     stats,
+    /** 본인확인 업체 연동 여부 (켜져 있으면 가입 시 본인정보 입력·문자 인증 대신 본인확인) */
+    identityEnabled: identity.enabled,
 
     /** 본인에게 보여주는 정보 */
     me(userId) {
@@ -140,6 +162,8 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
         identityComplete: Boolean(u.real_name && u.birth_date && u.phone),
         // verified: 휴대폰 본인 확인 완료 (합승 이용 조건)
         verified: Boolean(u.phone_verified),
+        // 'pass': 본인확인 업체로 이름·생년월일·성별까지 확인 / 'sms': 휴대폰 번호만 확인
+        identityMethod: u.phone_verified ? (u.identity_method ?? 'sms') : null,
         emailVerified: Boolean(u.email_verified),
         // 학교/회사 메일이면 소속 인증 가능
         orgCandidate: orgDomainOf(u.email),
@@ -178,6 +202,7 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
 
     /** 본인정보 입력/수정 (휴대폰 인증 전까지만) */
     setIdentity(userId, input) {
+      requirePassInstead();
       const user = load(userId);
       if (user.phone_verified) throw conflict('본인 확인이 끝난 정보는 바꿀 수 없어요.');
       const identity = normalizeIdentity(input);
@@ -188,6 +213,7 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
     },
 
     async sendPhoneCode(userId) {
+      requirePassInstead();
       const user = load(userId);
       if (user.phone_verified) throw conflict('이미 본인 확인이 완료되었습니다.');
       if (!user.phone) throw badRequest('먼저 본인정보를 입력해 주세요.');
@@ -213,6 +239,7 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
     verifyPhone(userId, code) {
       const user = load(userId);
       if (user.phone_verified) return service.me(userId);
+      requirePassInstead();
       const v = stmt.getPhoneVerification.get(userId);
       if (!v || v.phone !== user.phone || new Date(v.expires_at).getTime() < Date.now()) {
         throw badRequest('인증번호가 만료되었어요. 다시 받아 주세요.');
@@ -224,14 +251,61 @@ export function createUserService(db, { secret, mailer, sms, exposeDevCode = fal
       }
       stmt.deletePhoneVerification.run(userId);
       try {
-        stmt.markPhoneVerified.run(userId);
+        stmt.markPhoneVerified.run(new Date().toISOString(), userId);
       } catch {
         // 동시에 같은 번호로 인증한 다른 계정이 있는 경우 (유니크 인덱스)
         throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
       }
-      // 1년 안에 탈퇴한 같은 번호의 노쇼·직전취소 기록을 이어받는다 (재가입으로 기록 세탁 방지)
-      const prev = stmt.withdrawnRecord.get(phoneHash(user.phone), new Date(Date.now() - WITHDRAWN_RECORD_MS).toISOString());
-      if (prev.noShows || prev.lateCancels) stmt.restoreCounts.run(prev.noShows ?? 0, prev.lateCancels ?? 0, userId);
+      restoreWithdrawnRecord(userId, user.phone);
+      return service.me(userId);
+    },
+
+    /** 본인확인 시작: 이 계정 전용 인증 건 번호를 발급한다 (브라우저가 이 번호로 본인인증 창을 연다) */
+    startIdentity(userId) {
+      if (!identity.enabled) throw badRequest('본인확인 서비스가 아직 설정되지 않았어요.');
+      if (load(userId).phone_verified) throw conflict('이미 본인 확인이 완료되었습니다.');
+      const id = `meet-${userId}-${randomBytes(12).toString('hex')}`;
+      stmt.putIdentityRequest.run(id, userId, new Date().toISOString());
+      return { identityVerificationId: id };
+    },
+
+    /**
+     * 본인확인 완료: 인증 업체에 결과를 직접 조회해서 확인된 이름·생년월일·성별·번호로 계정을 확정한다.
+     * 가입할 때 입력한 성별이 달라도 확인된 성별로 바뀐다 (일반 택시 동성 합승 기준).
+     */
+    async completeIdentity(userId, identityVerificationId) {
+      if (!identity.enabled) throw badRequest('본인확인 서비스가 아직 설정되지 않았어요.');
+      const user = load(userId);
+      if (user.phone_verified) return service.me(userId);
+      const request = typeof identityVerificationId === 'string' && stmt.getIdentityRequest.get(identityVerificationId);
+      if (!request || request.user_id !== userId) throw badRequest('본인확인 요청을 찾을 수 없어요. 다시 시도해 주세요.');
+      if (request.used_at) throw conflict('이미 사용된 본인확인이에요. 다시 시도해 주세요.');
+      if (Date.now() - new Date(request.created_at).getTime() > IDENTITY_TTL_MS) {
+        throw badRequest('본인확인 시간이 지났어요. 다시 시도해 주세요.');
+      }
+      const verified = await identity.fetchVerified(identityVerificationId);
+      if (!verified) throw badRequest('본인확인이 완료되지 않았어요. 다시 시도해 주세요.');
+      if (!verified.name || !verified.birthDate || !verified.gender) {
+        throw badRequest('본인확인 결과에 이름·생년월일·성별이 없어요. 다른 인증 수단으로 다시 시도해 주세요.');
+      }
+      if (ageOn(verified.birthDate) < MIN_AGE) throw forbidden(`만 ${MIN_AGE}세 이상만 이용할 수 있어요.`);
+      // 번호를 제공하지 않는 인증 수단이면 가입 때 입력한 번호를 쓴다
+      const phone = verified.phone || user.phone;
+      if (!phone || !PHONE_RE.test(phone)) throw badRequest('휴대폰 번호를 확인할 수 없어요. 휴대폰 본인인증으로 다시 시도해 주세요.');
+      const key = verified.key ? identityKeyHash(verified.key) : null;
+      if (key && stmt.identityTaken.get(key, userId)) throw conflict('이미 가입된 계정이 있어요. 기존 계정으로 로그인해 주세요.');
+      if (stmt.phoneTaken.get(phone, userId)) throw conflict('이미 다른 계정에서 인증된 휴대폰 번호예요.');
+      if (!stmt.useIdentityRequest.run(new Date().toISOString(), identityVerificationId).changes) {
+        throw conflict('이미 사용된 본인확인이에요. 다시 시도해 주세요.');
+      }
+      try {
+        stmt.markIdentityVerified.run(verified.name, verified.birthDate, verified.gender, phone, key,
+          new Date().toISOString(), userId);
+      } catch {
+        // 동시에 같은 사람·번호로 인증한 다른 계정이 있는 경우 (유니크 인덱스)
+        throw conflict('이미 가입된 계정이 있어요. 기존 계정으로 로그인해 주세요.');
+      }
+      restoreWithdrawnRecord(userId, phone);
       return service.me(userId);
     },
 

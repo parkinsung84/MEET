@@ -136,6 +136,14 @@ CREATE TABLE IF NOT EXISTS phone_verifications (
   sent_at    TEXT NOT NULL
 );
 
+-- 본인확인(PASS 등) 요청 — 서버가 발급한 인증 건만, 발급받은 계정에서, 한 번만 사용
+CREATE TABLE IF NOT EXISTS identity_verifications (
+  id         TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  used_at    TEXT
+);
+
 -- 문자 발송 기록 (번호별·계정별 하루 발송 횟수 제한 — 문자 폭탄·비용 방지)
 CREATE TABLE IF NOT EXISTS sms_sends (
   phone   TEXT NOT NULL,
@@ -242,6 +250,9 @@ const COLUMNS = {
     org_domain: 'TEXT',              // 학교/회사 이메일 도메인 (인증 완료 시)
     no_show_count: 'INTEGER NOT NULL DEFAULT 0',
     late_cancel_count: 'INTEGER NOT NULL DEFAULT 0',
+    identity_key: 'TEXT',            // 본인확인 CI/DI 의 HMAC (1인 1계정 확인용, 원문은 저장하지 않음)
+    identity_method: 'TEXT',         // 'pass' (본인확인 업체) / 'sms' (문자 인증)
+    identity_verified_at: 'TEXT',
   },
   rides: {
     distance_km: 'REAL',             // 네이버 길찾기 실제 도로거리 (없으면 직선거리 추정)
@@ -281,6 +292,8 @@ function migrate(db) {
   }
   // 인증된 휴대폰 번호 하나당 계정 하나
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verified_phone ON users(phone) WHERE phone_verified = 1');
+  // 본인확인된 사람 한 명당 계정 하나
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_identity_key ON users(identity_key) WHERE identity_key IS NOT NULL');
 }
 export function openDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);

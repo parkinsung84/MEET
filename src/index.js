@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createApp } from './app.js';
+import { identityClientFromEnv } from './identity.js';
 import { createMailer } from './mailer.js';
 import { naverClientFromEnv } from './naver.js';
 import { ensureDemoAccount } from './seed.js';
@@ -22,6 +23,11 @@ if (!mailer.configured) console.warn('[warn] SMTP_URL 미설정: 인증 메일 �
 const sms = createSmsSender();
 if (!sms.configured) console.warn('[warn] NCP SENS 미설정: 인증문자 대신 콘솔에 인증번호를 출력합니다.');
 
+const identity = identityClientFromEnv();
+console.log(identity.enabled
+  ? '[info] 휴대폰 본인확인(PASS, 포트원) 사용: 문자 인증 대신 본인확인으로 가입을 완료합니다.'
+  : '[info] PORTONE_* 미설정: 휴대폰 본인확인 대신 문자 인증을 사용합니다.');
+
 const production = process.env.NODE_ENV === 'production';
 // 문자 발송(SENS) 준비 전 비공개 시범 운영용: 인증번호를 화면에 보여준다. 공개 운영에서는 절대 켜지 말 것.
 const showCodes = process.env.SHOW_VERIFICATION_CODES === '1';
@@ -34,6 +40,7 @@ const { server, db, startScheduler } = createApp({
   naver,
   mailer,
   sms,
+  identity,
   // 운영 환경에서는 절대 인증번호를 응답에 넣지 않는다
   exposeDevCode: !production || showCodes,
   production,

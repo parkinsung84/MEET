@@ -1,5 +1,6 @@
 import { hangup, initCalls } from './call.js';
 import { api, connectSocket, state } from './core.js';
+import { handleIdentityReturn } from './identity.js';
 import { loadNaverMaps } from './maps.js';
 import { registerServiceWorker, syncPush } from './push.js';
 import { myRidesScreen, notificationsScreen, profileScreen } from './screens/account.js';
@@ -111,6 +112,8 @@ async function boot() {
       localStorage.removeItem('meet.token');
     }
   }
+  // 모바일 본인확인에서 돌아온 경우 결과 처리
+  await handleIdentityReturn();
   window.addEventListener('hashchange', route);
   // 로그인/가입 직후 소켓 연결 등 세션 변경 반영
   window.addEventListener('hashchange', () => { if (state.user && !state.socket) connectSocket(); });

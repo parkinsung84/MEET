@@ -28,7 +28,7 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public', import.meta.url));
 const TICK_MS = 60 * 1000;
 
 /**
- * naver: 네이버 API 클라이언트, mailer: 메일 발송, sms: 문자 발송, push: Web Push 발송기 (테스트에서 대역 주입)
+ * naver: 네이버 API 클라이언트, mailer: 메일 발송, sms: 문자 발송, identity: 본인확인(PASS), push: Web Push 발송기 (테스트에서 대역 주입)
  * exposeDevCode: 메일/문자 서비스가 없을 때 인증번호를 응답에 포함 (개발용)
  */
 export function createApp({
@@ -37,6 +37,7 @@ export function createApp({
   naver = createNaverClient(),
   mailer = createMailer({}, { info() {} }),
   sms = createSmsSender({}, { log: { info() {} } }),
+  identity = { enabled: false, publicConfig: null },
   push,
   exposeDevCode = true,
   callRingTimeoutMs,
@@ -49,7 +50,7 @@ export function createApp({
   const auth = createAuth(db, secret);
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
-  const users = createUserService(db, { secret, mailer, sms, exposeDevCode });
+  const users = createUserService(db, { secret, mailer, sms, identity, exposeDevCode });
   const locationLog = createLocationLog(db);
   const rides = createRideService(db, {
     users,
@@ -107,6 +108,8 @@ export function createApp({
     vapidPublicKey: pusher?.publicKey ?? null,
     // 문자 발송 준비 상태 — 문자가 안 가는데 "보냈어요"라고 안내하지 않도록
     sms: { ready: sms.configured, showCodes: exposeDevCode && !sms.configured },
+    // 휴대폰 본인확인(PASS) — 있으면 문자 인증 대신 사용
+    identity: identity.publicConfig,
   }));
   app.use('/api/auth', authRouter(db, auth, users, account, authLimits));
   // 위치정보 이용·제공 사실 확인자료 열람 (본인)

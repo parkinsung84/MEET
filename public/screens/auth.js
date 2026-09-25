@@ -1,4 +1,5 @@
 import { api, refreshMe, setSession, state } from '../core.js';
+import { startIdentityVerification } from '../identity.js';
 import { h, toast } from '../ui.js';
 
 const MIN_AGE = 19;
@@ -76,6 +77,8 @@ export function authScreen() {
 
   function render() {
     const consents = consentBox();
+    // 본인확인(PASS)을 쓰면 실명·생년월일·번호는 가입 후 본인확인에서 자동으로 채워진다
+    const pass = Boolean(state.config.identity);
     const form = h('form', { class: 'card stack' },
       mode === 'register' && h('h2', {}, '계정'),
       h('input', { name: 'email', type: 'email', placeholder: '이메일', required: true, autocomplete: 'email' }),
@@ -83,7 +86,7 @@ export function authScreen() {
       mode === 'register' && [
         h('input', { name: 'nickname', placeholder: '닉네임 (동승자에게 보여요)', required: true, maxlength: 20 }),
         h('h2', {}, '본인정보'),
-        ...identityFields(),
+        ...(pass ? [h('p', { class: 'muted' }, '가입 후 휴대폰 본인확인(PASS)을 하면 이름·생년월일·성별이 자동으로 확인돼요.')] : identityFields()),
         h('div', { class: 'row gender-pick' },
           h('label', { class: 'check' }, h('input', { type: 'radio', name: 'gender', value: 'male', required: true }), '👨 남성'),
           h('label', { class: 'check' }, h('input', { type: 'radio', name: 'gender', value: 'female' }), '👩 여성')),
@@ -92,7 +95,7 @@ export function authScreen() {
         h('h2', {}, '약관 동의'),
         consents.el,
       ],
-      h('button', {}, mode === 'login' ? '로그인' : '가입하고 인증문자 받기'),
+      h('button', {}, mode === 'login' ? '로그인' : pass ? '가입하고 본인확인하기' : '가입하고 인증문자 받기'),
       mode === 'login' && h('a', { class: 'link-center', href: '#/forgot' }, '비밀번호를 잊으셨나요?'),
     );
     form.addEventListener('submit', async (e) => {
@@ -214,8 +217,37 @@ export function verifyScreen() {
     return form;
   }
 
+  /** 본인확인(PASS) — 실명·생년월일·성별·번호를 본인확인 업체에서 확인 */
+  function passForm() {
+    const button = h('button', {
+      class: 'wide',
+      onclick: async () => {
+        button.disabled = true;
+        try {
+          await startIdentityVerification();
+        } catch (err) {
+          toast(err.message);
+        } finally {
+          button.disabled = false;
+        }
+      },
+    }, '📱 휴대폰 본인확인 시작');
+    return h('div', { class: 'card stack' },
+      h('p', {}, '안전한 합승을 위해 ', h('strong', {}, '내 명의 휴대폰'), '으로 본인확인을 해 주세요. PASS 앱이나 문자로 인증할 수 있어요.'),
+      h('ul', { class: 'muted' },
+        h('li', {}, '이름·생년월일·성별이 자동으로 확인돼요 (일반 택시는 같은 성별끼리만 합승해요)'),
+        h('li', {}, `만 ${MIN_AGE}세 이상만 이용할 수 있어요`),
+        h('li', {}, '한 사람당 계정 하나만 만들 수 있어요')),
+      h('p', { class: 'muted' }, PRIVACY_NOTE),
+      button);
+  }
+
   let editing = false;
   function render() {
+    if (state.config.identity) {
+      root.replaceChildren(h('h1', {}, '📱 휴대폰 본인확인'), passForm());
+      return;
+    }
     root.replaceChildren(
       h('h1', {}, '📱 휴대폰 본인 확인'),
       h('p', { class: 'muted' }, '본인 확인을 마친 사람만 합승을 만들고 참여할 수 있어요. 휴대폰 번호 하나당 계정 하나만 만들 수 있어요.'),

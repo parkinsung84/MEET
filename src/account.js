@@ -37,7 +37,7 @@ export function createAccountService(db, { users, auth, sms, mailer, secret, exp
     // 개인정보 파기: 이메일·실명·생년월일·연락처 삭제, 닉네임 익명화. 합승 기록·채팅은 '탈퇴한 사용자'로 남는다.
     anonymize: db.prepare(`UPDATE users SET
       email = ?, password_hash = ?, nickname = '탈퇴한 사용자', real_name = NULL, birth_date = NULL, phone = NULL,
-      phone_verified = 0, email_verified = 0, org_domain = NULL, deleted_at = ? WHERE id = ?`),
+      phone_verified = 0, identity_key = NULL, email_verified = 0, org_domain = NULL, deleted_at = ? WHERE id = ?`),
     cleanups: [
       'DELETE FROM push_subscriptions WHERE user_id = ?',
       'DELETE FROM ride_alerts WHERE user_id = ?',

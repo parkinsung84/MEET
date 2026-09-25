@@ -46,17 +46,20 @@ export function authRouter(db, auth, users, account, limits = createAuthLimits()
       throw badRequest('닉네임은 1~20자로 입력해 주세요.');
     }
     if (!['male', 'female'].includes(gender)) throw badRequest('성별을 선택해 주세요.');
-    const identity = normalizeIdentity(req.body);
+    // 본인확인(PASS)을 쓰면 이름·생년월일·번호는 가입 후 본인확인 결과로 채운다
+    const identity = users.identityEnabled
+      ? { name: null, birthDate: null, phone: null }
+      : normalizeIdentity(req.body);
 
     const normalized = email.trim().toLowerCase();
     if (findByEmail.get(normalized)) throw conflict('이미 가입된 이메일입니다.');
-    if (phoneTaken.get(identity.phone)) throw conflict('이미 가입된 휴대폰 번호예요. 기존 계정으로 로그인해 주세요.');
+    if (identity.phone && phoneTaken.get(identity.phone)) throw conflict('이미 가입된 휴대폰 번호예요. 기존 계정으로 로그인해 주세요.');
     const { lastInsertRowid } = insert.run(normalized, hashPassword(password), nickname.trim(), gender,
       identity.name, identity.birthDate, identity.phone);
     const userId = Number(lastInsertRowid);
     users.agree(userId, CONSENT_KINDS);
-    // 가입과 동시에 휴대폰 인증번호 발송 (문자 발송 장애가 가입을 막지 않도록 실패는 무시 — 재발송 가능)
-    const verification = await users.sendPhoneCode(userId).catch((err) => {
+    // 문자 인증이면 가입과 동시에 인증번호 발송 (문자 발송 장애가 가입을 막지 않도록 실패는 무시 — 재발송 가능)
+    const verification = users.identityEnabled ? {} : await users.sendPhoneCode(userId).catch((err) => {
       console.error('[sms]', err.message);
       return {};
     });
@@ -106,6 +109,15 @@ export function authRouter(db, auth, users, account, limits = createAuthLimits()
     users.setIdentity(req.userId, req.body);
     const verification = await users.sendPhoneCode(req.userId);
     res.json({ user: users.me(req.userId), ...verification });
+  });
+
+  // 휴대폰 본인확인(PASS 등): 인증 건 발급 → 브라우저에서 본인인증 → 완료 확인
+  router.post('/identity/start', auth.required, (req, res) => {
+    res.json(users.startIdentity(req.userId));
+  });
+
+  router.post('/identity/complete', auth.required, async (req, res) => {
+    res.json({ user: await users.completeIdentity(req.userId, req.body?.identityVerificationId) });
   });
 
   router.post('/phone/send', auth.required, async (req, res) => {
