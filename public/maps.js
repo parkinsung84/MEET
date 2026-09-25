@@ -88,7 +88,7 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
  * 합승방 지도: 각 방의 출발지에 핀(라벨 = label(ride))을 찍고, 누르면 그 방으로 이동.
  * me가 있으면 내 출발지도 표시. 방이 없으면 me(또는 서울시청) 주변을 보여준다.
  */
-export function renderRidesMap(container, rides, { me, label }) {
+export function renderRidesMap(container, rides, { me, label, onPick }) {
   if (!mapsAvailable()) return null;
   const map = new naver.maps.Map(container, {
     center: latLng(me ?? rides[0]?.origin ?? DEFAULT_CENTER),
@@ -105,6 +105,16 @@ export function renderRidesMap(container, rides, { me, label }) {
     const marker = labelMarker(map, ride.origin, escapeHtml(label(ride)), ride.memberCount >= ride.maxSeats ? '#6b7280' : '#16a34a');
     naver.maps.Event.addListener(marker, 'click', () => { location.hash = `#/rides/${ride.id}`; });
     points.push(latLng(ride.origin));
+  }
+  // 빈 곳을 누르면 그 좌표를 알려준다 (출발지/도착지로 설정)
+  if (onPick) {
+    let pin = null;
+    naver.maps.Event.addListener(map, 'click', (e) => {
+      const at = { lat: e.coord.lat(), lng: e.coord.lng() };
+      pin?.setMap(null);
+      pin = new naver.maps.Marker({ map, position: e.coord });
+      onPick(at, () => pin?.setMap(null));
+    });
   }
   if (points.length > 1) {
     const bounds = new naver.maps.LatLngBounds(points[0], points[0]);
@@ -165,6 +175,11 @@ export function pickOnMap({ title, initial, reverse }) {
     }, 350);
 
     naver.maps.Event.addListener(map, 'dragstart', () => { confirmBtn.disabled = true; });
+    // 지도를 누르면 그 위치로 핀을 옮긴다
+    naver.maps.Event.addListener(map, 'click', (e) => {
+      confirmBtn.disabled = true;
+      map.panTo(e.coord);
+    });
     naver.maps.Event.addListener(map, 'idle', lookup);
     lookup();
   });

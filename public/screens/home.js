@@ -1,7 +1,7 @@
-import { placePicker, rideCard, toLocalInput } from '../components.js';
+import { placePicker, reverseGeocode, rideCard, toLocalInput } from '../components.js';
 import { api, formatTime, listen, relativeTime, state } from '../core.js';
 import { mapProblem, renderRidesMap } from '../maps.js';
-import { h, toast } from '../ui.js';
+import { h, sheet, toast } from '../ui.js';
 
 const NOW_WINDOW_MIN = 30;   // '지금 바로': 30분 안에 출발
 const LATER_WINDOW_MIN = 30; // '시간 지정': ±30분
@@ -78,7 +78,30 @@ export function homeScreen() {
   const list = h('div');
   // 검색 결과를 지도에 핀으로 (네이버 지도 키가 있을 때만 보임)
   const mapEl = h('div', { class: 'rides-map' });
-  const mapCard = h('div', { class: 'card map-card needs-map', hidden: true }, mapEl);
+  const mapCard = h('div', { class: 'card map-card needs-map', hidden: true }, mapEl,
+    h('div', { class: 'muted map-hint' }, '👆 지도를 누르면 그 위치를 출발지·도착지로 정할 수 있어요. 핀을 누르면 합승방으로 가요.'));
+
+  /** 지도에서 누른 곳 → 주소 확인 후 출발지/도착지로 설정하고 다시 검색 */
+  async function pickFromMap(at, clearPin) {
+    let place;
+    try {
+      place = await reverseGeocode(at.lat, at.lng);
+    } catch {
+      place = null;
+    }
+    place ??= { name: '지도에서 고른 위치', address: '', ...at };
+    const use = (picker) => (close) => {
+      close();
+      picker.set(place);
+      load();
+    };
+    sheet('📍 이 위치를…', h('div', { class: 'stack' },
+      h('strong', {}, place.name), place.address && h('div', { class: 'muted' }, place.address)), [
+      { label: '출발지로', onClick: use(origin) },
+      { label: '도착지로', onClick: use(dest) },
+      { label: '취소', class: 'secondary', onClick: (close) => { close(); clearPin(); } },
+    ]);
+  }
   let ridesMap = null;
   // 지도가 안 뜨면 이유를 보여준다 (운영 초기 설정 확인용)
   const mapNote = h('div', { class: 'card banner warn map-note', hidden: true });
@@ -95,6 +118,7 @@ export function homeScreen() {
     mapCard.hidden = false;
     ridesMap = renderRidesMap(mapEl, rides, {
       me,
+      onPick: pickFromMap,
       label: (r) => `${new Date(r.departAt).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })} · ${r.memberCount}/${r.maxSeats}명`,
     });
   }
