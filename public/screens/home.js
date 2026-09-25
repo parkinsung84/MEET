@@ -238,6 +238,9 @@ export function homeScreen() {
   // 다른 사용자가 방을 만들거나 참여하면 목록을 조용히 새로고침
   form.addEventListener('submit', (e) => { e.preventDefault(); load(); });
   listen(window, 'rides:changed', () => load({ silent: true }));
+  // 출발지·도착지를 고르면(현재 위치 포함) 바로 다시 찾고 지도도 그 위치로 옮긴다
+  origin.onChange = () => load();
+  dest.onChange = () => load();
   renderTabs();
   load({ silent: true });
   const banner = matchBanner();

@@ -23,6 +23,11 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     detail.textContent = place.address || '';
     list.hidden = true;
   }
+  /** 사용자가 직접 고른 경우 (검색 결과·현재 위치·지도) — 화면이 따라 움직이도록 알린다 */
+  function pick(place) {
+    select(place);
+    picker.onChange?.(place);
+  }
 
   const search = debounce(async (q) => {
     const id = ++seq;
@@ -34,7 +39,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
       const presetNote = source === 'preset' && h('li', { class: 'muted preset-note' },
         '⚠️ 지금은 주요 장소(서울역·강남역·공항 등)만 검색돼요. 모든 주소·장소를 찾으려면 운영자가 네이버 검색 키를 설정해야 해요.');
       list.replaceChildren(...(places.length
-        ? places.map((p) => h('li', { role: 'option', onclick: () => select(p) },
+        ? places.map((p) => h('li', { role: 'option', onclick: () => pick(p) },
             h('strong', {}, p.name),
             (p.address || p.category) && h('span', { class: 'muted' }, [p.category, p.address].filter(Boolean).join(' · '))))
         : [h('li', { class: 'muted' }, '검색 결과가 없어요.')]), ...(presetNote ? [presetNote] : []));
@@ -54,7 +59,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !list.hidden && suggestions.length) {
       e.preventDefault();
-      select(suggestions[0]);
+      pick(suggestions[0]);
     } else if (e.key === 'Escape') {
       list.hidden = true;
     }
@@ -70,7 +75,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     onclick: () => navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
-          select(await reverseGeocode(pos.coords.latitude, pos.coords.longitude));
+          pick(await reverseGeocode(pos.coords.latitude, pos.coords.longitude));
         } catch (err) {
           toast(err.message);
         }
@@ -87,11 +92,13 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     onclick: async () => {
       if (!mapsAvailable()) return toast('지도를 사용할 수 없습니다.');
       const place = await pickOnMap({ title: `${label} 선택`, initial: selected, reverse: reverseGeocode });
-      if (place) select(place);
+      if (place) pick(place);
     },
   }, '🗺️');
 
-  return {
+  const picker = {
+    /** 사용자가 장소를 고르면 호출 (set()으로 넣을 때는 호출하지 않음) */
+    onChange: null,
     el: h('label', { class: 'place-picker' }, label,
       h('div', { class: 'row' }, h('div', { class: 'combo' }, input, list), useCurrent, onMap),
       detail),
@@ -102,6 +109,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
       throw new Error(`${label}: 검색 결과 목록에서 장소를 선택해 주세요.`);
     },
   };
+  return picker;
 }
 
 export const routeSummary = (fare) =>
