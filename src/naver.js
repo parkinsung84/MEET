@@ -8,7 +8,8 @@
  * 키가 없는 기능은 비활성화되며, 호출하는 쪽에서 대체 동작을 한다.
  */
 
-import { matchStations, normalizeName, rankByName } from './place-match.js';
+import { haversineKm } from './geo.js';
+import { matchStations, normalizeName, rankByName, startsLike } from './place-match.js';
 
 const DEFAULT_MAPS_BASE_URL = 'https://maps.apigw.ntruss.com';
 const DEFAULT_OPENAPI_BASE_URL = 'https://openapi.naver.com';
@@ -139,6 +140,37 @@ export function createNaverClient({
     }));
   }
 
+  /** 좌표가 속한 시·군·구 이름 (약 1km 단위로 기억) */
+  async function areaOf({ lat, lng }) {
+    if (!mapsEnabled) return null;
+    const round = (v) => Math.round(v * 100) / 100;
+    return cached(`area:${round(lat)},${round(lng)}`, async () => {
+      const place = await client.reverseGeocode(round(lat), round(lng)).catch(() => null);
+      return place?.area ?? null;
+    });
+  }
+
+  /** 근처 결과 추가 + 정렬: 이름이 맞는 정도 → 가까운 순 */
+  async function nearFirst(q, places, near) {
+    let all = places;
+    const area = searchEnabled ? await areaOf(near) : null;
+    if (area && !q.includes(area)) {
+      const local = await cached(`search:${q}|${area}`, () => localSearch(`${q} ${area}`)).catch(() => []);
+      const seen = new Set(all.map((p) => `${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`));
+      all = [...all, ...local.filter((p) => Number.isFinite(p.lat) && !seen.has(`${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`))];
+    }
+    const nq = normalizeName(q);
+    const tier = (p) => {
+      const name = normalizeName(p.name);
+      return startsLike(name, nq) ? 0 : name.includes(nq) ? 1 : 2;
+    };
+    return all
+      .map((p) => ({ ...p, distanceKm: Math.round(haversineKm(near.lat, near.lng, p.lat, p.lng) * 10) / 10 }))
+      .map((p, i) => ({ p, i, t: tier(p) }))
+      .sort((a, b) => a.t - b.t || a.p.distanceKm - b.p.distanceKm || a.i - b.i)
+      .map((x) => x.p);
+  }
+
   function formatReverse(result) {
     const { region = {}, land } = result;
     const area = [region.area1?.name, region.area2?.name, region.area3?.name].filter(Boolean).join(' ');
@@ -148,17 +180,20 @@ export function createNaverClient({
     return [area, region.area4?.name, road].filter(Boolean).join(' ');
   }
 
-  return {
+  const client = {
     mapsEnabled,
     searchEnabled,
     directionsEnabled: mapsEnabled && directionsEnabled,
     /** 브라우저 지도 SDK 로딩용 공개 키 (NCP 콘솔에서 Web 서비스 URL로 사용처가 제한됨) */
     mapKeyId: mapsEnabled ? ncpKeyId : null,
 
-    /** 장소명 + 주소 검색 결과를 합쳐 돌려준다. 한쪽이 실패해도 다른 쪽 결과는 살린다. */
-    async searchPlaces(query) {
+    /**
+     * 장소명 + 주소 검색 결과를 합쳐 돌려준다. 한쪽이 실패해도 다른 쪽 결과는 살린다.
+     * near({ lat, lng })가 있으면 그 동네(시·군·구) 결과를 함께 찾고, 가까운 순으로 정렬해 거리(distanceKm)를 붙인다.
+     */
+    async searchPlaces(query, near = null) {
       const q = query.trim();
-      return cached(`search:${q}`, async () => {
+      const places = await cached(`search:${q}`, async () => {
         const tasks = [];
         if (searchEnabled) tasks.push(localSearch(q));
         if (mapsEnabled) tasks.push(geocode(q));
@@ -181,6 +216,8 @@ export function createNaverClient({
             return true;
           });
       });
+      if (!near) return places;
+      return nearFirst(q, places, near);
     },
 
     /** 좌표 → 주소. 결과가 없으면 null. */
@@ -198,7 +235,8 @@ export function createNaverClient({
         if (!best) return null;
         const building = best.land?.addition0?.value;
         const address = formatReverse(best);
-        return { name: building || address, address, lat, lng };
+        // area: 시·군·구 (근처 장소 검색에 사용)
+        return { name: building || address, address, lat, lng, area: best.region?.area2?.name || best.region?.area1?.name || null };
       });
     },
 
@@ -221,6 +259,7 @@ export function createNaverClient({
       };
     },
   };
+  return client;
 }
 
 export function naverClientFromEnv(env = process.env) {

@@ -123,6 +123,27 @@ test('역 이름 앞부분만 쳐도 그 역이 먼저 나온다 (입력 중인 
   assert.equal(calls.filter((c) => c.params.query === '동대구역').length, 1);
 });
 
+test('현재 위치를 주면 그 동네 결과를 함께 찾고 가까운 순으로 (거리 표시)', async () => {
+  const shop = (title, lng, lat) => ({ title, category: '카페', address: '', mapx: String(lng * 1e7), mapy: String(lat * 1e7) });
+  const { fetch, calls } = fakeFetch({
+    '/search/v1/local': (p) => [200, {
+      items: p.get('query') === '스타벅스 강남구'
+        ? [shop('스타벅스 강남역점', 127.0276, 37.4979)]
+        : [shop('스타벅스 해운대점', 129.16, 35.16), shop('스타벅스 광화문점', 126.977, 37.571)],
+    }],
+    '/map-geocode/v2/geocode': () => [200, { addresses: [] }],
+    '/map-reversegeocode/v2/gc': () => [200, { results: [{ name: 'addr', region: { area1: { name: '서울특별시' }, area2: { name: '강남구' } } }] }],
+  });
+  const naver = createNaverClient({ ...KEYS, apiHubKeyId: 'h', apiHubKey: 'k', fetch });
+  const places = await naver.searchPlaces('스타벅스', { lat: 37.4981, lng: 127.0280 });
+  assert.deepEqual(places.map((p) => p.name), ['스타벅스 강남역점', '스타벅스 광화문점', '스타벅스 해운대점']);
+  assert.equal(places[0].distanceKm, 0);
+  assert.ok(places[2].distanceKm > 300);
+  assert.ok(calls.some((c) => c.params.query === '스타벅스 강남구'), '동네 이름을 붙여 한 번 더 검색');
+  // 위치 없이 검색하면 거리 없음
+  assert.equal((await naver.searchPlaces('스타벅스'))[0].distanceKm, undefined);
+});
+
 test('reverseGeocode: 도로명 주소와 건물명을 돌려준다', async () => {
   const { fetch, calls } = fakeFetch({
     '/map-reversegeocode/v2/gc': () => [200, {
@@ -138,7 +159,7 @@ test('reverseGeocode: 도로명 주소와 건물명을 돌려준다', async () =
     }],
   });
   const place = await createNaverClient({ ...KEYS, fetch }).reverseGeocode(37.5547, 126.9707);
-  assert.deepEqual(place, { name: '서울역', address: '서울특별시 중구 봉래동2가 한강대로 405', lat: 37.5547, lng: 126.9707 });
+  assert.deepEqual(place, { name: '서울역', address: '서울특별시 중구 봉래동2가 한강대로 405', lat: 37.5547, lng: 126.9707, area: '중구' });
   assert.equal(calls[0].params.coords, '126.9707,37.5547');
 });
 

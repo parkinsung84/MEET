@@ -126,6 +126,7 @@ function orgCard(user) {
 
 const LOCATION_ACTIONS = {
   reverse_geocode: '📍 현재 위치 → 주소 변환',
+  place_search: '🔎 장소 검색 (현재 위치 근처 먼저)',
   search: '🔍 주변 합승 검색',
   ride_create: '🚕 합승방 생성',
   dropoff: '🛑 하차 지점 설정',

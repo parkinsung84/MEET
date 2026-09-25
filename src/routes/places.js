@@ -16,9 +16,17 @@ export function placesRouter(naver, auth, locationLog = null) {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (!q) throw badRequest('검색어를 입력해 주세요.');
     if (q.length > 50) throw badRequest('검색어가 너무 깁니다.');
-    if (!searchConfigured) return res.json({ places: searchPresetPlaces(q), source: 'preset' });
+    // 현재 위치(선택): 가까운 장소를 먼저 보여준다
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const near = req.query.lat != null && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+      ? { lat, lng } : null;
+    if (near) {
+      locationLog?.record(req.userId, { action: 'place_search', purpose: '장소 검색 시 현재 위치 근처 결과를 먼저 표시' }, { throttleMs: 10 * 60 * 1000 });
+    }
+    if (!searchConfigured) return res.json({ places: searchPresetPlaces(q, near), source: 'preset' });
     try {
-      res.json({ places: await naver.searchPlaces(q), source: 'naver' });
+      res.json({ places: await naver.searchPlaces(q, near), source: 'naver' });
     } catch (err) {
       throw upstream(err);
     }

@@ -5,6 +5,37 @@ import { debounce, h, toast } from './ui.js';
 export const reverseGeocode = (lat, lng) =>
   api('GET', `/places/reverse?${new URLSearchParams({ lat, lng })}`).then((r) => r.place);
 
+// 최근에 받은 현재 위치 (가까운 장소 먼저 검색용, 이 탭에서만 10분 기억)
+const HERE_KEY = 'meet.here';
+const HERE_TTL_MS = 10 * 60 * 1000;
+export function rememberHere(lat, lng) {
+  try { sessionStorage.setItem(HERE_KEY, JSON.stringify({ lat, lng, at: Date.now() })); } catch { /* 저장 불가 */ }
+}
+function recentHere() {
+  try {
+    const here = JSON.parse(sessionStorage.getItem(HERE_KEY));
+    return here && Date.now() - here.at < HERE_TTL_MS ? here : null;
+  } catch {
+    return null;
+  }
+}
+let locating = null;
+/** 검색창을 누르면 현재 위치를 한 번 받아 둔다 (거부했으면 다시 묻지 않음) */
+async function locateForSearch() {
+  if (recentHere() || locating || !('geolocation' in navigator)) return;
+  try {
+    const status = await navigator.permissions?.query({ name: 'geolocation' });
+    if (status?.state === 'denied') return;
+  } catch { /* permissions API 미지원 브라우저 */ }
+  locating = new Promise((resolve) => navigator.geolocation.getCurrentPosition(
+    (pos) => { rememberHere(pos.coords.latitude, pos.coords.longitude); resolve(); },
+    () => resolve(),
+    { enableHighAccuracy: false, maximumAge: 5 * 60 * 1000, timeout: 8000 },
+  )).finally(() => { locating = null; });
+}
+
+const formatKm = (km) => (km < 1 ? `${Math.round(km * 1000)}m` : `${km}km`);
+
 /**
  * 장소 선택기: 검색어 자동완성(네이버 장소·주소 검색), 현재 위치, 지도에서 선택.
  * value()는 선택된 {name, address, lat, lng}, 비어 있으면 null, 선택 없이 입력만 했으면 에러.
@@ -32,7 +63,9 @@ export function placePicker(label, { allowCurrent = false } = {}) {
   const search = debounce(async (q) => {
     const id = ++seq;
     try {
-      const { places, source } = await api('GET', `/places/search?${new URLSearchParams({ q })}`);
+      const here = recentHere();
+      const params = new URLSearchParams({ q, ...(here && { lat: here.lat, lng: here.lng }) });
+      const { places, source } = await api('GET', `/places/search?${params}`);
       if (id !== seq) return;
       suggestions = places;
       // 네이버 검색 키가 없으면 주요 장소 몇 곳만 검색된다는 걸 알려준다
@@ -41,7 +74,8 @@ export function placePicker(label, { allowCurrent = false } = {}) {
       list.replaceChildren(...(places.length
         ? places.map((p) => h('li', { role: 'option', onclick: () => pick(p) },
             h('strong', {}, p.name),
-            (p.address || p.category) && h('span', { class: 'muted' }, [p.category, p.address].filter(Boolean).join(' · '))))
+            (p.address || p.category || p.distanceKm != null) && h('span', { class: 'muted' },
+              [p.distanceKm != null && formatKm(p.distanceKm), p.category, p.address].filter(Boolean).join(' · '))))
         : [h('li', { class: 'muted' }, '검색 결과가 없어요.')]), ...(presetNote ? [presetNote] : []));
       list.hidden = false;
     } catch (err) {
@@ -49,6 +83,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     }
   }, 300);
 
+  input.addEventListener('focus', locateForSearch, { once: true });
   input.addEventListener('input', () => {
     selected = null;
     detail.textContent = '';
@@ -74,6 +109,7 @@ export function placePicker(label, { allowCurrent = false } = {}) {
     title: '현재 위치',
     onclick: () => navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        rememberHere(pos.coords.latitude, pos.coords.longitude);
         try {
           pick(await reverseGeocode(pos.coords.latitude, pos.coords.longitude));
         } catch (err) {

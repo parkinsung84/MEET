@@ -1,3 +1,5 @@
+import { haversineKm } from './geo.js';
+
 // 네이버 검색 API 키가 없을 때(로컬 개발/테스트) 사용하는 주요 거점 목록
 export const PRESET_PLACES = [
   { name: '서울역', lat: 37.5547, lng: 126.9707 },
@@ -20,7 +22,11 @@ export const PRESET_PLACES = [
   { name: '인천공항 T2', lat: 37.4690, lng: 126.4337 },
 ].map((p) => ({ ...p, address: '', category: '주요 거점' }));
 
-export function searchPresetPlaces(query) {
+export function searchPresetPlaces(query, near = null) {
   const q = query.replace(/\s/g, '');
-  return PRESET_PLACES.filter((p) => p.name.replace(/\s/g, '').includes(q));
+  const found = PRESET_PLACES.filter((p) => p.name.replace(/\s/g, '').includes(q));
+  if (!near) return found;
+  return found
+    .map((p) => ({ ...p, distanceKm: Math.round(haversineKm(near.lat, near.lng, p.lat, p.lng) * 10) / 10 }))
+    .sort((a, b) => a.distanceKm - b.distanceKm);
 }
