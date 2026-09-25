@@ -188,3 +188,17 @@ describe('정기 노선', () => {
     assert.equal((await api('GET', '/commutes/99999')).status, 404);
   });
 });
+
+describe('노선 목록', () => {
+  test('조건 없이 부르면 전체 노선, 위치는 거르지 않고 가까운 순으로 정렬만', async () => {
+    const u = await signup();
+    const far = (await post(u, { origin: HONGDAE, destination: GANGNAM, departTime: '09:00' })).body.commute;
+    const all = (await api('GET', '/commutes')).body.commutes;
+    assert.ok(all.some((c) => c.id === far.id));
+    const sorted = (await api('GET', `/commutes?nearLat=${BUNDANG.lat}&nearLng=${BUNDANG.lng}`)).body.commutes;
+    assert.equal(sorted.length, all.length, '거르지 않음');
+    const farIndex = sorted.findIndex((c) => c.id === far.id);
+    const bundangIndex = sorted.findIndex((c) => c.origin.area === '분당구 정자동' && c.seatsLeft > 0);
+    assert.ok(bundangIndex < farIndex, '분당 출발 노선이 홍대 출발보다 먼저');
+  });
+});

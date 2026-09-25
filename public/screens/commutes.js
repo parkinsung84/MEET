@@ -1,6 +1,6 @@
 import { formatKm, placePicker, trustChips } from '../components.js';
 import { api, canUseRides, emit, listen, onLeave, relativeTime, state, won } from '../core.js';
-import { locate, recentHere } from '../here.js';
+import { locate } from '../here.js';
 import { h, sheet, toast } from '../ui.js';
 
 // 정기 노선 (출퇴근 택시 크루): 누구나 볼 수 있는 목록 → 참여 → 크루 채팅 → 운행일마다 합승방 자동
@@ -55,7 +55,7 @@ export function commuteHomeScreen() {
     const words = filter.value.trim().split(/\s+/).filter(Boolean);
     const shown = all.filter((c) => words.every((w) => `${c.origin.area} ${c.destination.area} ${c.memo}`.includes(w)));
     list.replaceChildren(...(shown.length
-      ? shown.map(commuteCard)
+      ? [h('p', { class: 'muted list-count' }, words.length ? `${shown.length}개 노선` : `올라온 노선 전체 ${shown.length}개`), ...shown.map(commuteCard)]
       : [h('div', { class: 'empty stack' },
         h('div', {}, all.length ? '찾는 노선이 없어요.' : '아직 올라온 노선이 없어요.'),
         h('div', {}, '내 출퇴근 노선을 먼저 올려 두면, 같은 길을 가는 사람들이 보고 들어와요.'),
@@ -63,13 +63,8 @@ export function commuteHomeScreen() {
   }
 
   async function load() {
-    const params = new URLSearchParams();
-    // 내 위치를 알면 출발지가 가까운 노선부터 (반경 넉넉하게)
-    if (sortNear) {
-      params.set('originLat', sortNear.lat);
-      params.set('originLng', sortNear.lng);
-      params.set('radiusKm', 10);
-    }
+    // 항상 전체 노선. '가까운 순'을 켜면 거르지 않고 출발지가 가까운 순서로만 정렬
+    const params = new URLSearchParams(sortNear ? { nearLat: sortNear.lat, nearLng: sortNear.lng } : {});
     try {
       ({ commutes: all } = await api('GET', `/commutes?${params}`));
       render();
@@ -82,19 +77,20 @@ export function commuteHomeScreen() {
     type: 'button',
     class: 'secondary small',
     onclick: async () => {
+      if (sortNear) {
+        sortNear = null;
+        nearBtn.textContent = '📍 가까운 순';
+        nearBtn.classList.add('secondary');
+        return load();
+      }
       const here = await locate();
       if (!here) return toast('위치를 가져올 수 없어요. 브라우저의 위치 권한을 확인해 주세요.');
       sortNear = here;
-      nearBtn.textContent = '📍 내 근처(10km) 노선';
+      nearBtn.textContent = '📍 가까운 순 ✓';
       nearBtn.classList.remove('secondary');
       load();
     },
-  }, '📍 내 근처 노선만');
-  if (recentHere()) {
-    sortNear = recentHere();
-    nearBtn.textContent = '📍 내 근처(10km) 노선';
-    nearBtn.classList.remove('secondary');
-  }
+  }, '📍 가까운 순');
 
   filter.addEventListener('input', render);
   listen(window, 'commutes:changed', () => load());

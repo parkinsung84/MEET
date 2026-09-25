@@ -324,3 +324,4 @@ button.ok { background: #16a34a; color: #fff; }
 .fare-card .small { font-size: .75rem; margin: 8px 0 0; }
 .members li.member-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .member-row .link { margin-left: auto; }
+.list-count { margin: 0 0 8px; font-size: .85rem; }

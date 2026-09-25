@@ -281,17 +281,22 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       return service.get(id, ownerId);
     },
 
-    /** 노선 찾기 (로그인 없이도 가능). 출발지·도착지 3km, 시각 ±30분, 요일이 겹치는 노선 */
+    /**
+     * 노선 찾기 (로그인 없이도 가능).
+     * 조건 없이 부르면 올라온 노선 전체. originLat 등을 주면 출발지·도착지 3km, 시각 ±30분, 겹치는 요일로 거른다.
+     * nearLat/nearLng 는 거르지 않고 출발지가 가까운 순으로 정렬만 한다.
+     */
     search(query = {}, viewerId = null) {
-      const hasRoute = query.originLat != null || query.destLat != null;
       const list = stmt.open.all().filter((c) => nearEnough(c, query));
+      const near = query.nearLat != null ? { lat: Number(query.nearLat), lng: Number(query.nearLng) } : null;
       const score = (c) => (query.originLat != null ? haversineKm(Number(query.originLat), Number(query.originLng), c.origin_lat, c.origin_lng) : 0)
-        + (query.destLat != null ? haversineKm(Number(query.destLat), Number(query.destLng), c.dest_lat, c.dest_lng) : 0);
-      // 가까운 순(경로를 줬을 때) → 자리 남은 노선 먼저 → 최신순
-      const sorted = hasRoute ? list.sort((a, b) => score(a) - score(b)) : list;
+        + (query.destLat != null ? haversineKm(Number(query.destLat), Number(query.destLng), c.dest_lat, c.dest_lng) : 0)
+        + (near && Number.isFinite(near.lat) ? haversineKm(near.lat, near.lng, c.origin_lat, c.origin_lng) : 0);
+      // 가까운 순(위치를 줬을 때) → 자리 남은 노선 먼저 → 최신순
+      const sorted = query.originLat != null || query.destLat != null || near ? list.sort((a, b) => score(a) - score(b)) : list;
       return sorted.map((c) => serialize(c, { viewerId }))
         .sort((a, b) => (b.seatsLeft > 0) - (a.seatsLeft > 0))
-        .slice(0, 100);
+        .slice(0, 300);
     },
 
     get(id, viewerId = null) {
