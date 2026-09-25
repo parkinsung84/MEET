@@ -65,6 +65,9 @@ export function nextRun(days, time, now = Date.now()) {
   return null;
 }
 
+/** 노선 채팅 실시간 room 이름 */
+export const routeRoom = (from, to) => `route:${from}:${to}`;
+
 /** 서울 행정동 코드 → 동 (없으면 400) */
 function requireDong(code, label) {
   const dong = getDong(code);
@@ -122,6 +125,15 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     insertMessage: db.prepare('INSERT INTO commute_messages (commute_id, user_id, body) VALUES (?, ?, ?)'),
     messageById: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
       FROM commute_messages msg JOIN users u ON u.id = msg.user_id WHERE msg.id = ?`),
+    routeMessages: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
+      FROM route_messages msg JOIN users u ON u.id = msg.user_id
+      WHERE msg.from_code = ? AND msg.to_code = ? AND msg.id > ? ORDER BY msg.id DESC LIMIT 200`),
+    insertRouteMessage: db.prepare('INSERT INTO route_messages (from_code, to_code, user_id, body) VALUES (?, ?, ?, ?)'),
+    routeMessageById: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
+      FROM route_messages msg JOIN users u ON u.id = msg.user_id WHERE msg.id = ?`),
+    routeCrewMembers: db.prepare(`SELECT DISTINCT m.user_id AS id FROM commutes c JOIN commute_members m ON m.commute_id = c.id
+      WHERE c.status = 'open' AND c.origin_code = ? AND c.dest_code = ?`),
+    routeTalkers: db.prepare('SELECT DISTINCT user_id AS id FROM route_messages WHERE from_code = ? AND to_code = ?'),
     trip: db.prepare('SELECT * FROM commute_trips WHERE commute_id = ? AND date = ?'),
     putTrip: db.prepare('INSERT OR IGNORE INTO commute_trips (commute_id, date, ride_id) VALUES (?, ?, ?)'),
     setTripRide: db.prepare('UPDATE commute_trips SET ride_id = ? WHERE commute_id = ? AND date = ?'),
@@ -387,6 +399,34 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       stmt.removeMember.run(c.id, targetId);
       fire([targetId], { type: 'commute_removed', commuteId: c.id, title: '노선에서 제외되었어요', body: `${label(c)} 노선에서 제외되었어요.` });
       return service.get(c.id, userId);
+    },
+
+    /** 노선 채팅 (로그인한 사람 누구나 읽기, 본인 확인한 사람이 쓰기). 최근 200개 */
+    routeMessages(fromCode, toCode, afterId = 0) {
+      const from = requireDong(fromCode, '출발');
+      const to = requireDong(toCode, '도착');
+      return stmt.routeMessages.all(from.code, to.code, Number(afterId) || 0).reverse();
+    },
+
+    postRouteMessage(fromCode, toCode, userId, body) {
+      users.requireVerified(userId);
+      const from = requireDong(fromCode, '출발');
+      const to = requireDong(toCode, '도착');
+      if (from.code === to.code) throw badRequest('출발 동과 도착 동이 같아요.');
+      const msg = text(body, 500);
+      if (!msg) throw badRequest('메시지를 입력해 주세요.');
+      const { lastInsertRowid } = stmt.insertRouteMessage.run(from.code, to.code, userId, msg);
+      const message = { from: from.code, to: to.code, ...stmt.routeMessageById.get(lastInsertRowid) };
+      // 이 노선 크루 멤버와 이 채팅에서 이야기한 사람에게 알림 (채팅을 보고 있는 사람 제외, 알림함에는 남기지 않음)
+      const recipients = new Set([...stmt.routeCrewMembers.all(from.code, to.code), ...stmt.routeTalkers.all(from.code, to.code)].map((r) => r.id));
+      recipients.delete(userId);
+      if (notifier && recipients.size) {
+        notifier.notify([...recipients], {
+          type: 'route_chat', title: `💬 ${from.dong} → ${to.dong} 노선 채팅`, body: `${message.nickname}: ${msg.slice(0, 100)}`,
+          url: `/#/r/${from.code}/${to.code}`, skipRoom: routeRoom(from.code, to.code), store: false,
+        }).catch((err) => log.error('[notify]', err.message));
+      }
+      return message;
     },
 
     isMember(id, userId) {

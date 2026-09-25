@@ -217,3 +217,22 @@ describe('노선 목록', () => {
     assert.ok(nearIndex < farIndex, '역삼 출발 노선이 서교동 출발보다 먼저');
   });
 });
+
+describe('노선 채팅', () => {
+  test('같은 노선에 관심 있는 누구나 로그인하면 읽고 쓸 수 있고, 노선마다 따로다', async () => {
+    const [a, b] = [await signup(), await signup()];
+    const path = `/commutes/routes/${JAMSIL}/${SEOGYO}/messages`;
+    assert.equal((await api('GET', path)).status, 401, '로그인 필요');
+    const posted = await api('POST', path, { token: a.token, body: { body: '잠실새내역 4번 출구에서 타면 어때요?' } });
+    assert.equal(posted.status, 201, JSON.stringify(posted.body));
+    await api('POST', path, { token: b.token, body: { body: '좋아요! 도착은 홍대입구역 9번 출구로' } });
+    const { messages } = (await api('GET', path, { token: b.token })).body;
+    assert.deepEqual(messages.slice(-2).map((m) => m.body), ['잠실새내역 4번 출구에서 타면 어때요?', '좋아요! 도착은 홍대입구역 9번 출구로']);
+    assert.equal(messages.at(-1).nickname, b.user.nickname);
+    // 반대 방향은 다른 채팅방
+    const reverse = (await api('GET', `/commutes/routes/${SEOGYO}/${JAMSIL}/messages`, { token: a.token })).body.messages;
+    assert.equal(reverse.length, 0);
+    assert.equal((await api('POST', path, { token: a.token, body: { body: '  ' } })).status, 400);
+    assert.equal((await api('POST', `/commutes/routes/${JAMSIL}/${JAMSIL}/messages`, { token: a.token, body: { body: 'x' } })).status, 400);
+  });
+});

@@ -175,6 +175,16 @@ CREATE TABLE IF NOT EXISTS commute_messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 노선 채팅: 같은 노선(출발 동 → 도착 동)에 관심 있는 누구나 정확한 출발·도착 지점을 의논
+CREATE TABLE IF NOT EXISTS route_messages (
+  id         INTEGER PRIMARY KEY,
+  from_code  TEXT NOT NULL,
+  to_code    TEXT NOT NULL,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 날짜별로 자동으로 연 합승방 (ride_id NULL = 인원이 모자라 열지 않음)
 CREATE TABLE IF NOT EXISTS commute_trips (
   commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
@@ -285,6 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_ride_alerts_to ON ride_alerts(depart_to);
 CREATE INDEX IF NOT EXISTS idx_commutes_status ON commutes(status);
 CREATE INDEX IF NOT EXISTS idx_commute_members_user ON commute_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_commute_messages ON commute_messages(commute_id, id);
+CREATE INDEX IF NOT EXISTS idx_route_messages ON route_messages(from_code, to_code, id);
 `;
 
 // 이전 버전 DB 파일에 새 컬럼을 추가한다 (ALTER TABLE ADD COLUMN 은 NOT NULL 이면 기본값 필요)

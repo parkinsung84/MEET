@@ -336,3 +336,4 @@ button.ok { background: #16a34a; color: #fff; }
 .route-head .row { margin-top: 10px; flex-wrap: wrap; }
 .small-link { font-size: .85rem; }
 p.small { font-size: .72rem; }
+.empty-chat { text-align: center; padding: 24px 0; }

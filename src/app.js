@@ -176,6 +176,7 @@ export function createApp({
     commutes, auth,
     changed: (id) => realtime.commuteChanged(id).catch((err) => console.error('[realtime]', err)),
     messagePosted: realtime.commuteMessage,
+    routeMessagePosted: realtime.routeMessage,
   }));
   app.use('/api', (req, res) => res.status(404).json({ error: '존재하지 않는 API입니다.' }));
 

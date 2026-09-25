@@ -4,7 +4,7 @@ import { Router } from 'express';
  * 정기 노선 API. 목록·상세는 로그인 없이도 볼 수 있다 (링크 공유로 사람을 모으기 위해).
  * changed(commuteId): 멤버 화면 실시간 갱신, messagePosted(message): 크루 채팅 전달
  */
-export function commutesRouter({ commutes, auth, changed = () => {}, messagePosted = () => {} }) {
+export function commutesRouter({ commutes, auth, changed = () => {}, messagePosted = () => {}, routeMessagePosted = () => {} }) {
   const router = Router();
 
   router.get('/', auth.optional, (req, res) => {
@@ -17,6 +17,16 @@ export function commutesRouter({ commutes, auth, changed = () => {}, messagePost
   });
   router.get('/routes/:from/:to', auth.optional, (req, res) => {
     res.json({ route: commutes.route(req.params.from, req.params.to, req.userId) });
+  });
+
+  // 노선 채팅: 로그인한 사람은 누구나 읽고, 본인 확인한 사람이 쓴다
+  router.get('/routes/:from/:to/messages', auth.required, (req, res) => {
+    res.json({ messages: commutes.routeMessages(req.params.from, req.params.to, req.query.after) });
+  });
+  router.post('/routes/:from/:to/messages', auth.required, (req, res) => {
+    const message = commutes.postRouteMessage(req.params.from, req.params.to, req.userId, req.body?.body);
+    routeMessagePosted(message);
+    res.status(201).json({ message });
   });
 
   router.get('/mine', auth.required, (req, res) => {

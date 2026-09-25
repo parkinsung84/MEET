@@ -232,8 +232,65 @@ export function commuteHomeScreen() {
 
 // ---------------------------------------------------------------- 노선 화면 (출발 동 → 도착 동)
 
+/**
+ * 노선 채팅: 이 노선(출발 동 → 도착 동)에 관심 있는 사람 누구나 정확히 어디서 타고 내릴지 의논한다.
+ * 로그인한 사람만 보고 쓸 수 있다.
+ */
+function routeChatCard(fromCode, toCode) {
+  const log = h('div', { class: 'chat-log' });
+  const card = h('div', { class: 'card' },
+    h('h2', {}, '💬 노선 채팅'),
+    h('p', { class: 'muted' }, '이 노선에 관심 있는 사람 누구나 들어와요. 동 안에서 정확히 어디서 타고 어디서 내릴지 같이 정해 보세요. 집 주소 대신 역 출구·건물 앞처럼 공개된 장소로 이야기해 주세요.'));
+  if (!state.user) {
+    card.append(h('button', { class: 'secondary wide', onclick: () => requireLogin() }, '로그인하고 노선 채팅 보기'));
+    return card;
+  }
+  const append = (m) => {
+    log.querySelector('.empty-chat')?.remove();
+    log.append(h('div', { class: `msg${m.userId === state.user.id ? ' me' : ''}` },
+      h('div', { class: 'who' }, m.nickname), h('div', {}, m.body)));
+    log.scrollTop = log.scrollHeight;
+  };
+  const input = h('input', { placeholder: '예: 역삼역 3번 출구에서 타면 어때요?', maxlength: 500, autocomplete: 'off' });
+  const quick = h('div', { class: 'row quick-times' },
+    ...[['📍 출발지', '📍 출발은 여기 어때요: '], ['🏁 도착지', '🏁 내리는 곳은 여기 어때요: '], ['⏰ 시간', '⏰ 저는 이 시간에 타요: ']]
+      .map(([label, prefix]) => h('button', {
+        type: 'button', class: 'secondary small',
+        onclick: () => { input.value = prefix; input.focus(); },
+      }, label)));
+  const form = h('form', { class: 'row' }, input, h('button', { class: 'fit' }, '전송'));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!input.value.trim()) return;
+    if (!canUseRides()) { location.hash = '#/verify'; return; }
+    try {
+      await api('POST', `/commutes/routes/${fromCode}/${toCode}/messages`, { body: input.value });
+      input.value = '';
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  card.append(h('div', { class: 'chat' }, log, h('div', { class: 'stack' }, quick, form)));
+
+  const onMessage = (m) => { if (m.from === fromCode && m.to === toCode) append(m); };
+  state.socket?.on('route:message', onMessage);
+  emit('route:subscribe', { from: fromCode, to: toCode }).catch(() => {});
+  onLeave(() => {
+    state.socket?.off('route:message', onMessage);
+    state.socket?.emit('route:unsubscribe', { from: fromCode, to: toCode });
+  });
+  api('GET', `/commutes/routes/${fromCode}/${toCode}/messages`)
+    .then(({ messages }) => {
+      if (!messages.length) log.append(h('div', { class: 'muted empty-chat' }, '아직 대화가 없어요. 먼저 인사해 보세요!'));
+      messages.forEach(append);
+    })
+    .catch((err) => toast(err.message));
+  return card;
+}
+
 export function routeScreen(fromCode, toCode) {
   const root = h('div', {}, h('div', { class: 'empty' }, '불러오는 중…'));
+  const chat = routeChatCard(fromCode, toCode);
 
   async function share(r) {
     const url = `${location.origin}/r/${r.from.code}/${r.to.code}`;
@@ -265,6 +322,7 @@ export function routeScreen(fromCode, toCode) {
       ...(r.commutes.length
         ? r.commutes.map(commuteCard)
         : [h('p', { class: 'muted' }, '첫 크루를 만들어 보세요. 노선 링크를 공유하면 같은 길을 가는 사람들이 들어와요.')]),
+      chat,
       r.nearby.length > 0 && h('div', {},
         h('h2', {}, '🧭 이웃 동에서 출발·도착하는 크루'),
         h('p', { class: 'muted' }, '양쪽 끝이 1.5km 안이라 같이 타기 괜찮아요.'),
