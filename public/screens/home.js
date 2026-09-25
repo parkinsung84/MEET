@@ -1,4 +1,4 @@
-import { placePicker, reverseGeocode, rideCard, toLocalInput } from '../components.js';
+import { placePicker, reverseGeocode, rideCard, timePicker } from '../components.js';
 import { api, formatTime, listen, relativeTime, state } from '../core.js';
 import { mapProblem, renderRidesMap } from '../maps.js';
 import { h, sheet, toast } from '../ui.js';
@@ -70,8 +70,10 @@ export function homeScreen() {
   if (prev.origin) origin.set(prev.origin);
   if (prev.destination) dest.set(prev.destination);
 
-  const timeInput = h('input', { type: 'datetime-local', value: prev.time ?? toLocalInput(Date.now() + 60 * 60 * 1000) });
-  const timeRow = h('label', { hidden: mode === 'now' }, `출발 시간 (±${LATER_WINDOW_MIN}분)`, timeInput);
+  const savedTime = prev.time ? Date.parse(prev.time) : NaN;
+  const timePick = timePicker(savedTime > Date.now() ? savedTime : Date.now() + 60 * 60 * 1000, { onChange: () => load() });
+  const timeRow = h('div', { class: 'field', hidden: mode === 'now' },
+    h('span', { class: 'field-label' }, `출발 시간 (±${LATER_WINDOW_MIN}분)`), timePick.el);
   const radius = h('select', { 'aria-label': '검색 반경' },
     [1, 2, 3, 5].map((km) => h('option', { value: km, selected: km === (prev.radiusKm ?? 2) }, `반경 ${km}km`)));
   const modeTabs = h('div', { class: 'tabs' });
@@ -137,7 +139,7 @@ export function homeScreen() {
 
   function timeRange() {
     if (mode === 'now') return { from: new Date(), to: new Date(Date.now() + NOW_WINDOW_MIN * 60000) };
-    const center = new Date(timeInput.value);
+    const center = timePick.value();
     if (Number.isNaN(center.getTime())) throw new Error('출발 시간을 선택해 주세요.');
     return { from: new Date(center - LATER_WINDOW_MIN * 60000), to: new Date(center.getTime() + LATER_WINDOW_MIN * 60000) };
   }
@@ -181,7 +183,7 @@ export function homeScreen() {
       onclick: () => {
         sessionStorage.setItem('meet.draft', JSON.stringify({
           origin: o, destination: d,
-          departAt: mode === 'now' ? new Date(Date.now() + 10 * 60000).toISOString() : new Date(timeInput.value).toISOString(),
+          departAt: mode === 'now' ? new Date(Date.now() + 10 * 60000).toISOString() : timePick.value().toISOString(),
         }));
         location.hash = '#/new';
       },
@@ -215,7 +217,7 @@ export function homeScreen() {
       const d = dest.value();
       const range = timeRange();
       sessionStorage.setItem(SEARCH_KEY, JSON.stringify({
-        mode, origin: o, destination: d, time: timeInput.value, radiusKm: Number(radius.value),
+        mode, origin: o, destination: d, time: timePick.value().toISOString(), radiusKm: Number(radius.value),
       }));
       const params = new URLSearchParams({ radiusKm: radius.value, from: range.from.toISOString(), to: range.to.toISOString() });
       if (o) params.set('originLat', o.lat), params.set('originLng', o.lng);

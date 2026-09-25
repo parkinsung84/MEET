@@ -271,7 +271,7 @@ export function createUserService(db, { secret, mailer, sms, identity = { enable
 
     /**
      * 본인확인 완료: 인증 업체에 결과를 직접 조회해서 확인된 이름·생년월일·성별·번호로 계정을 확정한다.
-     * 가입할 때 입력한 성별이 달라도 확인된 성별로 바뀐다 (일반 택시 동성 합승 기준).
+     * 가입할 때 입력한 성별이 달라도 확인된 성별로 바뀐다 (동승자에게 보이는 성별·성별 조건 합승).
      */
     async completeIdentity(userId, identityVerificationId) {
       if (!identity.enabled) throw badRequest('본인확인 서비스가 아직 설정되지 않았어요.');

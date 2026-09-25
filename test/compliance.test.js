@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { identity, relaxedLimits } from './helpers.js';
 
-// 택시발전법 합승 기준(동성·좌석 안내·긴급신고)과 위치정보 이용·제공 사실 기록
+// 합승 기준(성별 조건·좌석 안내·긴급신고)과 위치정보 이용·제공 사실 기록
 
 const SEOUL_STN = { name: '서울역', lat: 37.5547, lng: 126.9707 };
 const GANGNAM = { name: '강남역', lat: 37.4979, lng: 127.0276 };
@@ -53,38 +53,36 @@ before(async () => {
 });
 after(() => new Promise((resolve) => server.close(resolve)));
 
-describe('합승 기준: 택시 종류와 성별', () => {
-  test('일반 택시(중형 이하)는 "성별 무관"을 요청해도 방장 성별끼리만', async () => {
+describe('합승 기준: 성별', () => {
+  test('기본은 성별 무관 — 다른 성별도 참여하고 검색된다', async () => {
     const host = await signup('female');
-    const ride = await createRide(host, { genderPref: 'any' });
-    assert.equal(ride.taxiType, 'standard');
+    const ride = await createRide(host);
+    assert.equal(ride.genderPref, 'any');
+    assert.equal(ride.taxiType, undefined, '택시 종류 구분 없음');
+    const man = await signup('male');
+    const search = await api('GET', '/rides', { token: man.token });
+    assert.ok(search.body.rides.some((r) => r.id === ride.id));
+    assert.equal((await join(man, ride.id)).status, 200);
+  });
+
+  test('방장이 원하면 같은 성별만 — 다른 성별은 참여·검색 불가', async () => {
+    const host = await signup('female');
+    const ride = await createRide(host, { genderPref: 'female' });
     assert.equal(ride.genderPref, 'female');
     const man = await signup('male');
     const res = await join(man, ride.id);
     assert.equal(res.status, 403);
-    assert.match(res.body.error, /같은 성별/);
+    assert.match(res.body.error, /성별 조건/);
     const search = await api('GET', '/rides', { token: man.token });
-    assert.ok(!search.body.rides.some((r) => r.id === ride.id), '다른 성별에게는 검색되지 않음');
+    assert.ok(!search.body.rides.some((r) => r.id === ride.id));
     assert.equal((await join(await signup('female'), ride.id)).status, 200);
   });
 
-  test('대형 택시는 성별 무관 가능, 잘못된 택시 종류는 거절', async () => {
-    const host = await signup('female');
-    const ride = await createRide(host, { taxiType: 'large' });
-    assert.equal(ride.genderPref, 'any');
-    assert.equal((await join(await signup('male'), ride.id)).status, 200);
-    const bad = await api('POST', '/rides', {
-      token: (await signup()).token,
-      body: { origin: SEOUL_STN, destination: GANGNAM, departAt: new Date(Date.now() + 3600_000).toISOString(), taxiType: 'bus' },
-    });
-    assert.equal(bad.status, 400);
-  });
-
-  test('예전 데이터(성별 무관 + 일반 택시)도 방장 성별로 적용', async () => {
+  test('예전 방(일반 택시로 만들어진 방)도 성별 무관이면 누구나 참여', async () => {
     const host = await signup('male');
     const ride = await createRide(host);
-    db.prepare("UPDATE rides SET gender_pref = 'any' WHERE id = ?").run(ride.id);
-    assert.equal((await join(await signup('female'), ride.id)).status, 403);
+    db.prepare("UPDATE rides SET taxi_type = 'standard', gender_pref = 'any' WHERE id = ?").run(ride.id);
+    assert.equal((await join(await signup('female'), ride.id)).status, 200);
   });
 });
 

@@ -263,3 +263,12 @@ button.ok { background: #16a34a; color: #fff; }
 .sms-notice { background: #fef3c7; color: #92400e; border-radius: 10px; padding: 10px 12px; font-size: .9rem; margin: 0; }
 .sms-notice.warn { background: #fee2e2; color: #991b1b; display: grid; gap: 4px; }
 .sms-notice p { margin: 0; }
+
+/* 출발 시간: 날짜 목록 + 시각 입력 + 빠른 선택 */
+.field { display: grid; gap: 6px; color: var(--muted); font-size: .9rem; }
+.field-label { font-weight: 600; }
+.time-picker { display: grid; gap: 8px; }
+.time-picker .day-select { flex: 1.3; }
+.time-picker .time-input { flex: 1; font-size: 1.05rem; font-weight: 700; }
+.quick-times button { flex: 1; }
+.time-hint:empty { display: none; }

@@ -167,7 +167,6 @@ export function rideCard(ride) {
       ride.match?.type === 'onTheWay' && h('span', { class: 'chip ok' }, '가는 길에 하차'),
       ride.joined && h('span', { class: 'chip ok' }, '참여 중'),
       ride.orgOnly && h('span', { class: 'chip' }, `🎓 ${ride.orgOnly}만`),
-      ride.taxiType === 'large' && h('span', { class: 'chip' }, '🚐 대형 택시'),
       h('span', { class: 'chip' }, GENDER_LABEL[ride.genderPref]),
     ),
     h('div', { class: 'host-line muted' }, `방장 ${ride.host.nickname}`, trustChips(ride.host)),
@@ -175,6 +174,83 @@ export function rideCard(ride) {
 }
 
 /** datetime-local 입력값 ↔ Date */
+const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+const DAY_LABELS = ['오늘', '내일', '모레'];
+const pad = (n) => String(n).padStart(2, '0');
+const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d; };
+
+/**
+ * 출발 시간 선택: 날짜는 "오늘/내일…" 목록, 시간은 시간 입력칸 — 보통은 시간만 바꾸면 된다.
+ * 오늘인데 이미 지난 시간을 고르면 자동으로 내일로 넘긴다. 빠른 선택(10분 뒤 등) 버튼 제공.
+ * value() → Date, set(ms), onChange(Date)
+ */
+export function timePicker(initial, { days = 7, onChange } = {}) {
+  const daySelect = h('select', { 'aria-label': '출발 날짜', class: 'day-select' });
+  const timeInput = h('input', { type: 'time', 'aria-label': '출발 시각', class: 'time-input' });
+  const hint = h('div', { class: 'muted time-hint' });
+
+  function renderDays() {
+    const today = startOfDay(Date.now());
+    const keep = daySelect.value;
+    daySelect.replaceChildren(...Array.from({ length: days }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const date = `${d.getMonth() + 1}/${d.getDate()} ${DAY_NAMES[d.getDay()]}`;
+      return h('option', { value: i }, DAY_LABELS[i] ? `${DAY_LABELS[i]} (${date})` : date);
+    }));
+    if (keep) daySelect.value = keep;
+  }
+
+  function value() {
+    const d = startOfDay(Date.now());
+    d.setDate(d.getDate() + Number(daySelect.value || 0));
+    const [hh, mm] = (timeInput.value || '00:00').split(':').map(Number);
+    d.setHours(hh, mm, 0, 0);
+    return d;
+  }
+
+  function set(ms) {
+    // 5분 단위로 올림
+    const t = new Date(Math.ceil(ms / 300000) * 300000);
+    const offset = Math.round((startOfDay(t) - startOfDay(Date.now())) / 86400000);
+    renderDays();
+    daySelect.value = String(Math.min(Math.max(offset, 0), days - 1));
+    timeInput.value = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    hint.textContent = '';
+  }
+
+  function changed() {
+    hint.textContent = '';
+    // 오늘인데 지난 시각이면 내일로
+    if (daySelect.value === '0' && timeInput.value && value().getTime() < Date.now() - 60000) {
+      daySelect.value = '1';
+      hint.textContent = '⏭️ 이미 지난 시각이라 내일로 바꿨어요.';
+    }
+    onChange?.(value());
+  }
+  daySelect.addEventListener('change', changed);
+  timeInput.addEventListener('change', changed);
+
+  const quick = [[10, '10분 뒤'], [30, '30분 뒤'], [60, '1시간 뒤']].map(([min, label]) => h('button', {
+    type: 'button',
+    class: 'secondary small',
+    onclick: () => {
+      set(Date.now() + min * 60000);
+      onChange?.(value());
+    },
+  }, label));
+
+  set(initial ?? Date.now() + 15 * 60000);
+  return {
+    el: h('div', { class: 'time-picker' },
+      h('div', { class: 'row' }, daySelect, timeInput),
+      h('div', { class: 'row quick-times' }, quick),
+      hint),
+    value,
+    set,
+  };
+}
+
 export function toLocalInput(date) {
   const d = new Date(date);
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());

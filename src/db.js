@@ -270,7 +270,7 @@ const COLUMNS = {
     taxi_note: 'TEXT',               // 차종·색상 등 메모
     taxi_recorded_by: 'INTEGER',
     taxi_recorded_at: 'TEXT',
-    taxi_type: "TEXT NOT NULL DEFAULT 'standard'", // standard: 중형 이하(동성만) / large: 대형·승합(성별 무관 가능)
+    taxi_type: "TEXT NOT NULL DEFAULT 'standard'", // (사용 안 함 — 예전 택시 종류 구분)
   },
   ride_members: {
     dropoff_name: 'TEXT',            // 가는 길에 먼저 내리는 경우 하차 지점 (NULL = 최종 도착지)

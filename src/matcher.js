@@ -11,7 +11,6 @@ const DEMAND_KM = 2;                    // 수요 표시: 출발·도착 2km 안
  *  1) 요청을 올리면 맞는 방이 있을 때 바로 참여시킨다 (가는 길 하차 포함).
  *  2) 없으면 조건이 맞는 다른 대기 요청과 짝지어 방을 만들고, 나머지 대기 요청도 그 방에 넣어 본다.
  *  3) 그래도 없으면 기다리다가 새 방·새 요청이 생기거나 주기 작업 때 다시 시도한다.
- * 같은 성별끼리만 자동으로 방을 만든다 (일반 택시 합승 기준).
  */
 export function createMatcher(db, { rides, users, notifier, onChange = () => {}, log = console }) {
   const stmt = {
@@ -73,7 +72,6 @@ export function createMatcher(db, { rides, users, notifier, onChange = () => {},
     if (a.user_id === b.user_id) return null;
     const ua = stmt.userById.get(a.user_id);
     const ub = stmt.userById.get(b.user_id);
-    if (ua.gender !== ub.gender) return null;
     if (users.blockedSet(a.user_id).has(b.user_id)) return null;
     if ((a.org_only || b.org_only) && (!ua.org_domain || ua.org_domain !== ub.org_domain)) return null;
     const radius = Math.min(a.radius_km, b.radius_km);
@@ -104,7 +102,6 @@ export function createMatcher(db, { rides, users, notifier, onChange = () => {},
         destination: place(other, 'dest'),
         departAt: new Date(fit.from).toISOString(),
         maxSeats: 4,
-        taxiType: 'standard',
         meetingPoint: other.origin_name,
         orgOnly: Boolean(other.org_only || request.org_only),
         memo: '🤖 자동 매칭으로 만들어진 합승방이에요. 채팅으로 인사하고 만남 장소를 확인해 주세요.',

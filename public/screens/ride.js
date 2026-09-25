@@ -184,7 +184,7 @@ export function rideScreen(rideId) {
       h('div', { class: 'boarding-note' },
         h('strong', {}, '탑승 전 안내'),
         h('ul', {},
-          h('li', {}, ride.taxiType === 'large' ? '🚐 대형 택시(6인승 이상·승합)로 타는 합승이에요.' : `🚕 일반 택시 합승 — ${GENDER_LABEL[ride.genderPref]}만 탈 수 있어요.`),
+          ride.genderPref !== 'any' && h('li', {}, `${GENDER_LABEL[ride.genderPref]} 타는 합승이에요.`),
           h('li', {}, '💺 좌석은 참여 순서대로 배정되고, 탑승 전까지 바꿀 수 있어요.'),
           h('li', {}, '🚨 위급하면 합승 화면의 긴급 버튼 → 112 전화·문자로 바로 신고할 수 있어요.'))));
     sheet('합승 참여', body, [{
@@ -300,9 +300,7 @@ export function rideScreen(rideId) {
       h('div', { class: 'seat-map' }, SEAT_LAYOUT.map((row) => h('div', { class: 'seat-row' }, row.map(cell)))),
       h('p', { class: 'muted' }, mySeat ? `내 자리: ${SEAT_LABEL[mySeat]} · 빈 자리를 누르면 옮길 수 있어요.` : '빈 자리를 눌러 앉을 자리를 정하세요.'),
       h('ul', { class: 'muted guide' },
-        h('li', {}, ride.taxiType === 'large'
-          ? '🚐 대형 택시(6인승 이상·승합)를 불러 주세요.'
-          : `🚕 일반 택시 합승 — ${GENDER_LABEL[ride.genderPref]} 탑승해요.`),
+        ride.maxSeats > 4 && h('li', {}, '🚐 인원이 많으면 대형 택시를 불러 주세요.'),
         h('li', {}, '🚕 탑승하면 차량번호를 기록하고, 필요하면 가족에게 안심 공유하세요.'),
         h('li', {}, h('strong', {}, '🚨 위급하면 화면 오른쪽 위 긴급 버튼'), ' → 112 전화 또는 문자 신고 (차량번호·경로 자동 입력)')));
   }
@@ -583,7 +581,6 @@ export function rideScreen(rideId) {
         h('div', { class: 'muted' }, `${formatTime(ride.departAt)} 출발 · ${STATUS_LABEL[ride.status]}`),
         h('div', { class: 'chips' },
           h('span', { class: 'chip' }, `${ride.memberCount}/${ride.maxSeats}명`),
-          ride.taxiType === 'large' ? h('span', { class: 'chip' }, '🚐 대형 택시') : h('span', { class: 'chip' }, '🚕 일반 택시'),
           h('span', { class: 'chip' }, GENDER_LABEL[ride.genderPref]),
           ride.orgOnly && h('span', { class: 'chip' }, `🎓 ${ride.orgOnly}만`)),
         ride.memo && h('p', {}, ride.memo),

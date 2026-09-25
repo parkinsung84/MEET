@@ -4,8 +4,6 @@ import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.j
 import { estimateFare, haversineKm, projectOnRoute, splitByDropoffs, splitFare } from './geo.js';
 
 const GENDERS = ['any', 'male', 'female'];
-// 택시발전법 시행규칙(2022.6): 경형·소형·중형 택시 합승은 같은 성별끼리만, 대형(6~10인승)·승합은 성별 제한 없음
-export const TAXI_TYPES = ['standard', 'large'];
 // 탑승 전 좌석 안내 (배정 순서)
 export const SEATS = ['front', 'rear_right', 'rear_left', 'rear_middle'];
 export const SEAT_LABELS = { front: '조수석', rear_right: '뒷좌석 오른쪽', rear_left: '뒷좌석 왼쪽', rear_middle: '뒷좌석 가운데' };
@@ -116,8 +114,8 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
     insertRide: db.prepare(`
       INSERT INTO rides (host_id, origin_name, origin_lat, origin_lng, dest_name, dest_lat, dest_lng,
                          depart_at, max_seats, gender_pref, memo, meeting_point, org_domain,
-                         distance_km, duration_min, taxi_fare, route_path, taxi_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                         distance_km, duration_min, taxi_fare, route_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertMember: db.prepare(`INSERT INTO ride_members (ride_id, user_id, dropoff_name, dropoff_lat, dropoff_lng, dropoff_t, seat)
       VALUES (?, ?, ?, ?, ?, ?, ?)`),
     takenSeats: db.prepare('SELECT user_id, seat FROM ride_members WHERE ride_id = ? AND seat IS NOT NULL'),
@@ -189,14 +187,9 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
   }
 
   /** 성별·소속·차단 조건으로 이 사용자가 참여할 수 있는 방인지 */
-  /**
-   * 이 방에 탈 수 있는 성별 (null = 제한 없음).
-   * 일반(중형 이하) 택시는 같은 성별끼리만 탈 수 있으므로 방장 성별로 고정된다.
-   */
+  /** 이 방에 탈 수 있는 성별 (null = 제한 없음). 기본은 성별 무관, 방장이 원하면 같은 성별만 */
   function requiredGender(ride) {
-    if (ride.gender_pref !== 'any') return ride.gender_pref;
-    if (ride.taxi_type !== 'large') return stmt.userById.get(ride.host_id)?.gender ?? null;
-    return null;
+    return ride.gender_pref !== 'any' ? ride.gender_pref : null;
   }
 
   /** 비어 있는 첫 좌석 */
@@ -209,9 +202,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
 
   function eligibility(ride, user, blocked = users.blockedSet(user.id)) {
     const gender = requiredGender(ride);
-    if (gender && gender !== user.gender) {
-      return ride.taxi_type === 'large' ? '성별 조건이 맞지 않아 참여할 수 없습니다.' : '일반 택시 합승은 같은 성별끼리만 탈 수 있어요.';
-    }
+    if (gender && gender !== user.gender) return '성별 조건이 맞지 않아 참여할 수 없습니다.';
     if (ride.org_domain && (!user.email_verified || user.org_domain !== ride.org_domain)) {
       return `@${ride.org_domain} 인증 사용자만 참여할 수 있는 합승입니다.`;
     }
@@ -272,8 +263,6 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
       destination: { name: ride.dest_name, lat: ride.dest_lat, lng: ride.dest_lng },
       departAt: ride.depart_at,
       maxSeats: ride.max_seats,
-      taxiType: ride.taxi_type,
-      // 실제로 적용되는 성별 조건 (일반 택시는 방장 성별로 고정)
       genderPref: requiredGender(ride) ?? 'any',
       orgOnly: ride.org_domain,
       memo: ride.memo,
@@ -318,9 +307,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
       if (departAt.getTime() > now + MAX_ADVANCE_MS) throw badRequest('출발 시간은 7일 이내로 설정해 주세요.');
       const maxSeats = Number(input.maxSeats ?? 4);
       if (!Number.isInteger(maxSeats) || maxSeats < 2 || maxSeats > 4) throw badRequest('정원은 2~4명입니다.');
-      const taxiType = input.taxiType ?? 'standard';
-      if (!TAXI_TYPES.includes(taxiType)) throw badRequest('택시 종류가 올바르지 않습니다.');
-      let genderPref = input.genderPref ?? 'any';
+      const genderPref = input.genderPref ?? 'any';
       if (!GENDERS.includes(genderPref)) throw badRequest('성별 조건이 올바르지 않습니다.');
       const memo = typeof input.memo === 'string' ? input.memo.trim().slice(0, 200) : '';
       const meetingPoint = typeof input.meetingPoint === 'string' ? input.meetingPoint.trim().slice(0, 100) : '';
@@ -329,8 +316,6 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
       if (genderPref !== 'any' && host.gender !== genderPref) {
         throw badRequest('본인이 참여할 수 없는 성별 조건입니다.');
       }
-      // 일반 택시는 같은 성별끼리만 (법령) — 방장 성별로 고정
-      if (taxiType === 'standard') genderPref = host.gender;
       if (input.orgOnly && !host.org_domain) throw badRequest('학교/회사 이메일 인증을 한 사용자만 소속 전용 합승을 만들 수 있어요.');
       assertNoOverlap(hostId, departAt.toISOString());
 
@@ -341,7 +326,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
           hostId, origin.name, origin.lat, origin.lng, destination.name, destination.lat, destination.lng,
           departAt.toISOString(), maxSeats, genderPref, memo, meetingPoint, input.orgOnly ? host.org_domain : null,
           route?.distanceKm ?? null, route?.durationMin ?? null, route?.taxiFare ?? null,
-          route?.path?.length ? JSON.stringify(route.path) : null, taxiType,
+          route?.path?.length ? JSON.stringify(route.path) : null,
         );
         stmt.insertMember.run(lastInsertRowid, hostId, null, null, null, 1, SEATS[0]);
         return Number(lastInsertRowid);

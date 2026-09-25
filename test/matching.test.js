@@ -86,7 +86,7 @@ describe('자동 매칭', () => {
     assert.equal(ride.hostId, a.user.id, '먼저 기다린 사람이 방장');
     assert.equal(ride.meetingPoint, '서울역', '방장 출발지가 만남 장소');
     assert.equal(ride.memberCount, 2);
-    assert.equal(ride.genderPref, 'male');
+    assert.equal(ride.genderPref, 'any', '자동 매칭 방은 성별 무관');
     const depart = Date.parse(ride.departAt);
     assert.ok(depart >= Date.parse(inMin(t + 10)) - 1000 && depart <= Date.parse(inMin(t + 30)), '두 사람 시간이 겹치는 첫 시각');
     assert.equal((await api('GET', '/matching', { token: a.token })).body.request.status, 'matched');
@@ -109,12 +109,10 @@ describe('자동 매칭', () => {
     assert.equal((await api('GET', '/matching', { token: waiter.token })).body.request.rideId, body.ride.id);
   });
 
-  test('성별·차단·시간·거리가 안 맞으면 짝짓지 않음', async () => {
+  test('차단·시간·거리가 안 맞으면 짝짓지 않음', async () => {
     const t = nextSlot();
     const base1 = await signup('female');
     await request(base1, { origin: SEOUL_STN, destination: GANGNAM, from: inMin(t), to: inMin(t + 30) });
-    const man = await signup('male');
-    assert.equal((await request(man, { origin: SEOUL_STN, destination: GANGNAM, from: inMin(t), to: inMin(t + 30) })).body.request.status, 'waiting', '성별 다름');
     const blocked = await signup('female');
     await api('POST', `/users/${blocked.user.id}/block`, { token: base1.token });
     assert.equal((await request(blocked, { origin: SEOUL_STN, destination: GANGNAM, from: inMin(t), to: inMin(t + 30) })).body.request.status, 'waiting', '차단');
@@ -197,7 +195,7 @@ describe('비슷한 방 방지·합치기', () => {
     assert.ok((await notes(b)).some((n) => n.type === 'join' && n.body.includes('비슷한 방')));
   });
 
-  test('자리가 모자라거나 성별이 다르면 합칠 수 없음', async () => {
+  test('자리가 모자라거나 성별 조건이 안 맞으면 합칠 수 없음', async () => {
     const t = nextSlot();
     const host = await signup();
     const full = (await api('POST', '/rides', { token: host.token, body: { origin: SEOUL_STN, destination: GANGNAM, departAt: inMin(t + 30), maxSeats: 2 } })).body.ride;
@@ -207,8 +205,8 @@ describe('비슷한 방 방지·합치기', () => {
     assert.equal((await api('POST', `/rides/${mine.id}/merge`, { token: other.token, body: { targetId: full.id } })).status, 409);
 
     const woman = await signup('female');
-    const hers = (await api('POST', '/rides', { token: woman.token, body: { origin: SEOUL_STN, destination: GANGNAM, departAt: inMin(t + 40) } })).body.ride;
-    assert.equal((await api('POST', `/rides/${hers.id}/merge`, { token: woman.token, body: { targetId: mine.id } })).status, 403);
+    const hers = (await api('POST', '/rides', { token: woman.token, body: { origin: SEOUL_STN, destination: GANGNAM, departAt: inMin(t + 40), genderPref: 'female' } })).body.ride;
+    assert.equal((await api('POST', `/rides/${mine.id}/merge`, { token: other.token, body: { targetId: hers.id } })).status, 403, '여성 전용 방으로는 합칠 수 없음');
   });
 });
 
@@ -217,6 +215,7 @@ describe('수요 표시', () => {
     const t = nextSlot();
     const [w1, w2, alerter, me] = [await signup(), await signup('female'), await signup(), await signup()];
     await request(w1, { origin: JAMSIL, destination: GANGNAM, from: inMin(t), to: inMin(t + 30) });
+    await api('POST', `/users/${w1.user.id}/block`, { token: w2.token }); // 둘이 짝지어지지 않도록
     await request(w2, { origin: JAMSIL, destination: GANGNAM_NEAR, from: inMin(t), to: inMin(t + 30) });
     await api('POST', '/alerts', { token: alerter.token, body: { origin: JAMSIL, destination: GANGNAM, from: inMin(t), to: inMin(t + 60) } });
     await request(me, { origin: JAMSIL, destination: GANGNAM, from: inMin(t + 200), to: inMin(t + 230) });
