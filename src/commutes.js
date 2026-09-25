@@ -129,6 +129,9 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     routeMessages: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
       FROM route_messages msg JOIN users u ON u.id = msg.user_id
       WHERE msg.from_code = ? AND msg.to_code = ? AND msg.id > ? ORDER BY msg.id DESC LIMIT 200`),
+    allRouteMessages: db.prepare(`SELECT msg.id, msg.from_code AS "from", msg.to_code AS "to", msg.body, msg.created_at AS createdAt,
+      u.id AS userId, u.nickname FROM route_messages msg JOIN users u ON u.id = msg.user_id
+      WHERE msg.id > ? ORDER BY msg.id DESC LIMIT 100`),
     insertRouteMessage: db.prepare('INSERT INTO route_messages (from_code, to_code, user_id, body) VALUES (?, ?, ?, ?)'),
     routeMessageById: db.prepare(`SELECT msg.id, msg.body, msg.created_at AS createdAt, u.id AS userId, u.nickname
       FROM route_messages msg JOIN users u ON u.id = msg.user_id WHERE msg.id = ?`),
@@ -139,6 +142,15 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
     putTrip: db.prepare('INSERT OR IGNORE INTO commute_trips (commute_id, date, ride_id) VALUES (?, ?, ?)'),
     setTripRide: db.prepare('UPDATE commute_trips SET ride_id = ? WHERE commute_id = ? AND date = ?'),
   };
+
+  // 거점 노선이 아닌 예전 크루(행정동·지도 핀으로 만든 것)는 모집 종료로 정리
+  const hubIds = HUBS.map((x) => x.id);
+  db.prepare(`UPDATE commutes SET status = 'closed' WHERE status = 'open'
+    AND (origin_code IS NULL OR dest_code IS NULL OR origin_code NOT IN (${hubIds.map(() => '?').join(',')})
+      OR dest_code NOT IN (${hubIds.map(() => '?').join(',')}))`).run(...hubIds, ...hubIds);
+
+  /** 노선 채팅 메시지에 노선 이름을 붙인다 (전체 채팅용) */
+  const withRoute = (m) => ({ ...m, fromName: getHub(m.from)?.name ?? m.from, toName: getHub(m.to)?.name ?? m.to });
 
   function fire(userIds, notification) {
     if (!notifier || !userIds.length) return;
@@ -422,6 +434,11 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       return stmt.routeMessages.all(from.code, to.code, Number(afterId) || 0).reverse();
     },
 
+    /** 전체 채팅: 모든 노선 채팅을 합쳐 최근 100개 (어느 노선에 사람이 있는지 한눈에) */
+    allRouteMessages(afterId = 0) {
+      return stmt.allRouteMessages.all(Number(afterId) || 0).reverse().map(withRoute);
+    },
+
     postRouteMessage(fromCode, toCode, userId, body) {
       users.requireVerified(userId);
       const from = requireHub(fromCode, '출발');
@@ -430,7 +447,7 @@ export function createCommuteService(db, { rides, users, notifier, findRoute = n
       const msg = text(body, 500);
       if (!msg) throw badRequest('메시지를 입력해 주세요.');
       const { lastInsertRowid } = stmt.insertRouteMessage.run(from.code, to.code, userId, msg);
-      const message = { from: from.code, to: to.code, ...stmt.routeMessageById.get(lastInsertRowid) };
+      const message = withRoute({ from: from.code, to: to.code, ...stmt.routeMessageById.get(lastInsertRowid) });
       // 이 노선 크루 멤버와 이 채팅에서 이야기한 사람에게 알림 (채팅을 보고 있는 사람 제외, 알림함에는 남기지 않음)
       const recipients = new Set([...stmt.routeCrewMembers.all(from.code, to.code), ...stmt.routeTalkers.all(from.code, to.code)].map((r) => r.id));
       recipients.delete(userId);

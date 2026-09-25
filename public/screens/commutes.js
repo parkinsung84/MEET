@@ -49,7 +49,7 @@ export function loadHubs({ fresh = false } = {}) {
 
 /** 거점 고르기 (지역별로 묶은 선택 목록). value() → 거점 id 또는 null */
 function hubSelect(label, { initial = null } = {}) {
-  const select = h('select', { 'aria-label': label }, h('option', { value: '' }, `${label} 선택`));
+  const select = h('select', { 'aria-label': label }, h('option', { value: '' }, label));
   loadHubs().then(({ groups, hubs }) => {
     select.append(...groups.map((g) => h('optgroup', { label: g },
       hubs.filter((x) => x.group === g).map((x) => h('option', { value: x.code, selected: x.code === initial }, x.name)))));
@@ -179,6 +179,62 @@ function hubChooser() {
   return box;
 }
 
+/**
+ * 전체 채팅: 모든 노선 채팅이 한곳에 모인다 ("강남역 → 삼성 · 지민: 강남역에서 코엑스 가실 분").
+ * 어느 노선에 사람이 있는지 보는 용도. 노선을 골라 바로 글을 올릴 수 있고, 노선 이름을 누르면 그 노선으로.
+ */
+function globalChatCard() {
+  const card = h('div', { class: 'card global-chat' },
+    h('h2', {}, '💬 전체 채팅'),
+    h('p', { class: 'muted' }, '모든 노선의 채팅이 여기 모여요. 같이 탈 사람이 있는 노선을 찾아보세요.'));
+  if (!state.user) {
+    card.append(h('button', { class: 'secondary wide', onclick: () => requireLogin() }, '로그인하고 전체 채팅 보기'));
+    return card;
+  }
+  const log = h('div', { class: 'chat-log' });
+  const append = (m) => {
+    log.querySelector('.empty-chat')?.remove();
+    log.append(h('div', { class: `gmsg${m.userId === state.user.id ? ' me' : ''}` },
+      h('a', { class: 'gmsg-route', href: `#/r/${m.from}/${m.to}` }, `${m.fromName} → ${m.toName}`),
+      h('div', {}, h('span', { class: 'who' }, `${m.nickname} `), m.body)));
+    log.scrollTop = log.scrollHeight;
+  };
+  const from = hubSelect('출발');
+  const to = hubSelect('도착');
+  const input = h('input', { placeholder: '예: 강남역에서 코엑스 가실 분', maxlength: 500, autocomplete: 'off' });
+  const form = h('form', { class: 'stack' },
+    h('div', { class: 'row gchat-route' }, from.el, h('span', { class: 'arrow' }, '→'), to.el),
+    h('div', { class: 'row' }, input, h('button', { class: 'fit' }, '전송')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!input.value.trim()) return;
+    if (!from.value() || !to.value()) return toast('어느 노선 이야기인지 출발·도착을 골라 주세요.');
+    if (!canUseRides()) { location.hash = '#/verify'; return; }
+    try {
+      await api('POST', `/commutes/routes/${from.value()}/${to.value()}/messages`, { body: input.value });
+      input.value = '';
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  card.append(h('div', { class: 'chat' }, log, form));
+
+  const onMessage = (m) => append(m);
+  state.socket?.on('routes:message', onMessage);
+  emit('routes:subscribe').catch(() => {});
+  onLeave(() => {
+    state.socket?.off('routes:message', onMessage);
+    state.socket?.emit('routes:unsubscribe');
+  });
+  api('GET', '/commutes/chat')
+    .then(({ messages }) => {
+      if (!messages.length) log.append(h('div', { class: 'muted empty-chat' }, '아직 대화가 없어요. 내 노선을 골라 첫 글을 남겨 보세요!'));
+      messages.forEach(append);
+    })
+    .catch((err) => toast(err.message));
+  return card;
+}
+
 export function commuteHomeScreen() {
   const featuredBox = h('div', { class: 'featured' }, h('div', { class: 'empty' }, '불러오는 중…'));
   loadHubs({ fresh: true }).then(({ featured }) => {
@@ -205,6 +261,7 @@ export function commuteHomeScreen() {
     h('section', { class: 'hero' },
       h('h1', {}, '출퇴근 택시, 같이 타면 ', h('span', { class: 'hl-text' }, '반값')),
       h('p', {}, '강남·여의도·광화문·판교 등 주요 업무지구 노선이 모두 준비돼 있어요. 내 출퇴근 노선을 골라 같은 시간에 타는 사람들과 크루를 만드세요.')),
+    globalChatCard(),
     h('h2', {}, '🔥 추천 출퇴근 노선'),
     featuredBox,
     h('h2', {}, '🧭 노선 직접 고르기'),

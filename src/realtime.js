@@ -4,6 +4,7 @@ import { inquiryRoom } from './inquiries.js';
 
 const room = (rideId) => `ride:${rideId}`;
 const commuteRoom = (id) => `commute:${id}`;
+const ALL_ROUTES_ROOM = 'routes:all';
 
 /**
  * 실시간 채널.
@@ -66,6 +67,9 @@ export function attachRealtime(io, rides, auth, { calls = null, commutes = null 
       return {};
     }));
     socket.on('route:unsubscribe', (payload) => { const key = routeKey(payload); if (key) socket.leave(key); });
+    // 전체 채팅 (모든 노선 채팅)
+    socket.on('routes:subscribe', handle(() => { socket.join(ALL_ROUTES_ROOM); return {}; }));
+    socket.on('routes:unsubscribe', () => socket.leave(ALL_ROUTES_ROOM));
 
     socket.on('chat:send', handle(({ rideId, body } = {}) => {
       const message = rides.postMessage(rideId, userId, body);
@@ -77,6 +81,7 @@ export function attachRealtime(io, rides, auth, { calls = null, commutes = null 
   return {
     routeMessage(message) {
       io.to(routeRoom(message.from, message.to)).emit('route:message', message);
+      io.to(ALL_ROUTES_ROOM).emit('routes:message', message);
     },
     commuteMessage(message) {
       io.to(commuteRoom(message.commuteId)).emit('commute:message', message);

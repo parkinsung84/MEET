@@ -22,6 +22,11 @@ export function commutesRouter({ commutes, auth, changed = () => {}, messagePost
     res.json({ route: commutes.route(req.params.from, req.params.to, req.userId) });
   });
 
+  // 전체 채팅: 모든 노선 채팅이 합쳐진 흐름 (로그인한 사람)
+  router.get('/chat', auth.required, (req, res) => {
+    res.json({ messages: commutes.allRouteMessages(req.query.after) });
+  });
+
   // 노선 채팅: 로그인한 사람은 누구나 읽고, 본인 확인한 사람이 쓴다
   router.get('/routes/:from/:to/messages', auth.required, (req, res) => {
     res.json({ messages: commutes.routeMessages(req.params.from, req.params.to, req.query.after) });

@@ -240,3 +240,19 @@ describe('노선 채팅', () => {
     assert.equal((await api('POST', `/commutes/routes/${JAMSIL}/${JAMSIL}/messages`, { token: a.token, body: { body: 'x' } })).status, 400);
   });
 });
+
+describe('전체 채팅', () => {
+  test('모든 노선 채팅이 노선 이름과 함께 한곳에 모인다', async () => {
+    const u = await signup();
+    await api('POST', '/commutes/routes/gangnam/samseong/messages', { token: u.token, body: { body: '강남역에서 코엑스 가실 분' } });
+    await api('POST', '/commutes/routes/magok/yeouido/messages', { token: u.token, body: { body: '마곡나루역 8시 출발해요' } });
+    assert.equal((await api('GET', '/commutes/chat')).status, 401);
+    const { messages } = (await api('GET', '/commutes/chat', { token: u.token })).body;
+    const last = messages.slice(-2);
+    assert.deepEqual(last.map((m) => [m.fromName, m.toName, m.body]), [
+      ['강남역', '삼성', '강남역에서 코엑스 가실 분'],
+      ['마곡', '여의도', '마곡나루역 8시 출발해요'],
+    ]);
+    assert.equal(last[0].from, 'gangnam');
+  });
+});
