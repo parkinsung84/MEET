@@ -399,7 +399,8 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
     },
 
     /** 참여. dropoff: 가는 길에 먼저 내릴 곳 (생략하면 최종 도착지) */
-    join(rideId, userId, { dropoff } = {}) {
+    /** quiet: 알림 없이 참여 (정기 노선 합승방 자동 구성) */
+    join(rideId, userId, { dropoff, quiet = false } = {}) {
       users.requireVerified(userId);
       const place = dropoff ? requirePlace(dropoff, '하차 지점') : null;
       const ride = loadRide(rideId);
@@ -429,6 +430,7 @@ export function createRideService(db, { findRoute = null, users, notifier, locat
         recordLocation(userId, { action: 'dropoff', purpose: '가는 길 하차 지점 설정 — 요금 분담 계산', recipient: '같은 합승 멤버' });
       }
 
+      if (quiet) return service.get(ride.id, userId);
       const others = memberIdsOf(ride.id).filter((id) => id !== userId);
       const nickname = nicknameOf(userId);
       fire(others, {

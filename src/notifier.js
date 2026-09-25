@@ -51,15 +51,16 @@ export function createNotifier(db, { push = null, log = console } = {}) {
      * skipRoom: 이 소켓 room 을 보고 있는 사람은 건너뜀 (참여 문의 대화 등)
      * store: false 면 알림함에 남기지 않음 (채팅 메시지 — 채팅 내역이 이미 있으므로)
      */
-    async notify(userIds, { type, title, body, rideId = null, skipViewers = false, skipRoom = null, store = true }) {
-      const url = rideId ? `/#/rides/${rideId}` : '/#/notifications';
-      const room = skipRoom ?? (skipViewers && rideId ? `ride:${rideId}` : null);
+    async notify(userIds, { type, title, body, rideId = null, commuteId = null, skipViewers = false, skipRoom = null, store = true }) {
+      // 합승방 알림이면 그 방으로, 정기 노선 알림이면 노선 화면으로
+      const url = rideId ? `/#/rides/${rideId}` : commuteId ? `/#/c/${commuteId}` : '/#/notifications';
+      const room = skipRoom ?? (skipViewers && rideId ? `ride:${rideId}` : skipViewers && commuteId ? `commute:${commuteId}` : null);
       const viewers = room ? await usersInRoom(room) : new Set();
       await Promise.all([...new Set(userIds)].filter((id) => !viewers.has(id)).map(async (userId) => {
-        let notification = { type, title, body, url, rideId };
+        let notification = { type, title, body, url, rideId, commuteId };
         if (store) {
           const { lastInsertRowid } = stmt.insert.run(userId, rideId, type, title, body, url);
-          notification = toJson(stmt.byId.get(lastInsertRowid));
+          notification = { ...toJson(stmt.byId.get(lastInsertRowid)), commuteId };
         }
         io?.to(`user:${userId}`).emit('notification', notification);
         await sendPush(userId, { title, body, url, tag: rideId ? `ride-${rideId}-${type}` : type });

@@ -2,6 +2,7 @@ import { HttpError } from './errors.js';
 import { inquiryRoom } from './inquiries.js';
 
 const room = (rideId) => `ride:${rideId}`;
+const commuteRoom = (id) => `commute:${id}`;
 
 /**
  * 실시간 채널.
@@ -11,7 +12,7 @@ const room = (rideId) => `ride:${rideId}`;
  *                     inquiry:message(message) — 문의자 본인과 방을 보고 있는 멤버에게
  * 연결되면 개인 room(user:<id>)에 들어가 알림을 받는다.
  */
-export function attachRealtime(io, rides, auth, { calls = null } = {}) {
+export function attachRealtime(io, rides, auth, { calls = null, commutes = null } = {}) {
   io.use((socket, next) => {
     const userId = auth.verify(socket.handshake.auth?.token ?? '');
     if (!userId) return next(new Error('unauthorized'));
@@ -47,6 +48,14 @@ export function attachRealtime(io, rides, auth, { calls = null } = {}) {
     }));
     socket.on('inquiry:unsubscribe', (rideId) => socket.leave(inquiryRoom(Number(rideId), userId)));
 
+    // 정기 노선 크루 채팅·갱신 (멤버만)
+    socket.on('commute:subscribe', handle((id) => {
+      if (!commutes?.isMember(id, userId)) throw new HttpError(403, '노선 멤버만 입장할 수 있습니다.');
+      socket.join(commuteRoom(Number(id)));
+      return {};
+    }));
+    socket.on('commute:unsubscribe', (id) => socket.leave(commuteRoom(Number(id))));
+
     socket.on('chat:send', handle(({ rideId, body } = {}) => {
       const message = rides.postMessage(rideId, userId, body);
       io.to(room(Number(rideId))).emit('chat:message', { rideId: Number(rideId), ...message });
@@ -55,6 +64,18 @@ export function attachRealtime(io, rides, auth, { calls = null } = {}) {
   });
 
   return {
+    commuteMessage(message) {
+      io.to(commuteRoom(message.commuteId)).emit('commute:message', message);
+    },
+    /** 노선 정보가 바뀌면 멤버 화면 갱신, 나간 사람 소켓은 room 에서 뺀다 */
+    async commuteChanged(id) {
+      for (const socket of await io.in(commuteRoom(id)).fetchSockets()) {
+        if (!commutes.isMember(id, socket.data.userId)) socket.leave(commuteRoom(id));
+      }
+      io.to(commuteRoom(id)).emit('commute:updated', { id });
+      io.emit('commutes:changed');
+    },
+
     /** 문의 메시지를 문의자 대화 room 과 멤버(ride room)에게 전달 (두 room 에 모두 있는 소켓에는 한 번만 감) */
     inquiryPosted(message) {
       io.to(inquiryRoom(message.rideId, message.guestId)).to(room(message.rideId)).emit('inquiry:message', message);

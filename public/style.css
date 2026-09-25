@@ -297,3 +297,30 @@ button.ok { background: #16a34a; color: #fff; }
 .no-map-only { display: none; }
 .no-map .no-map-only { display: block; }
 .no-map .place-picker .combo.no-map-only { flex: 1; }
+
+/* ---------- 정기 노선 ---------- */
+.hero { padding: 8px 0 4px; }
+.hero h1 { font-size: 1.6rem; line-height: 1.3; margin-bottom: 8px; }
+.hero p { color: var(--muted); margin: 0 0 14px; }
+.hero-actions .btn { flex: 1; text-align: center; padding: 14px; font-size: 1.05rem; }
+.hl-text { background: linear-gradient(transparent 60%, var(--brand) 60%); }
+.list-tools { margin: 16px 0 8px; }
+.list-tools input { flex: 1; }
+.list-tools button { white-space: nowrap; }
+.commute-card { display: grid; gap: 4px; color: var(--ink); text-decoration: none; }
+.commute-card.full { opacity: .6; }
+.commute-time { display: flex; align-items: baseline; gap: 8px; }
+.commute-time strong { font-size: 1.3rem; }
+.commute-time span { color: var(--muted); font-weight: 600; }
+.commute-time.big strong { font-size: 1.8rem; }
+.memo-line { margin: 4px 0 0; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.center { text-align: center; }
+.day-toggles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.day-toggles .day { padding: 10px 0; background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+.day-toggles .day.on { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.trip-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.trip-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.trip-list li.skipping strong { text-decoration: line-through; color: var(--muted); }
+.fare-card .small { font-size: .75rem; margin: 8px 0 0; }
+.members li.member-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.member-row .link { margin-left: auto; }

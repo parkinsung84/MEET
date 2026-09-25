@@ -136,6 +136,61 @@ CREATE TABLE IF NOT EXISTS phone_verifications (
   sent_at    TEXT NOT NULL
 );
 
+-- 정기 노선 (출퇴근 택시 크루): 요일·시각마다 같은 경로를 같이 타는 모임
+CREATE TABLE IF NOT EXISTS commutes (
+  id            INTEGER PRIMARY KEY,
+  owner_id      INTEGER NOT NULL REFERENCES users(id),
+  origin_name   TEXT NOT NULL,
+  origin_lat    REAL NOT NULL,
+  origin_lng    REAL NOT NULL,
+  origin_area   TEXT NOT NULL,          -- 공개용 대략적 위치 (예: 분당구 정자동)
+  dest_name     TEXT NOT NULL,
+  dest_lat      REAL NOT NULL,
+  dest_lng      REAL NOT NULL,
+  dest_area     TEXT NOT NULL,
+  days          INTEGER NOT NULL,       -- 요일 비트: 월=1 화=2 수=4 목=8 금=16 토=32 일=64
+  depart_time   TEXT NOT NULL,          -- 'HH:MM' (한국 시간)
+  max_seats     INTEGER NOT NULL DEFAULT 4,
+  gender_pref   TEXT NOT NULL DEFAULT 'any' CHECK (gender_pref IN ('any', 'male', 'female')),
+  meeting_point TEXT NOT NULL DEFAULT '',
+  memo          TEXT NOT NULL DEFAULT '',
+  distance_km   REAL,
+  taxi_fare     INTEGER,
+  status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS commute_members (
+  commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  joined_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (commute_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS commute_messages (
+  id         INTEGER PRIMARY KEY,
+  commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- "이 날은 못 타요" (날짜: 한국 시간 YYYY-MM-DD)
+CREATE TABLE IF NOT EXISTS commute_skips (
+  commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  date       TEXT NOT NULL,
+  PRIMARY KEY (commute_id, user_id, date)
+);
+
+-- 날짜별로 자동으로 연 합승방 (ride_id NULL = 인원이 모자라 열지 않음)
+CREATE TABLE IF NOT EXISTS commute_trips (
+  commute_id INTEGER NOT NULL REFERENCES commutes(id) ON DELETE CASCADE,
+  date       TEXT NOT NULL,
+  ride_id    INTEGER REFERENCES rides(id),
+  PRIMARY KEY (commute_id, date)
+);
+
 -- 본인확인(PASS 등) 요청 — 서버가 발급한 인증 건만, 발급받은 계정에서, 한 번만 사용
 CREATE TABLE IF NOT EXISTS identity_verifications (
   id         TEXT PRIMARY KEY,
@@ -235,6 +290,9 @@ CREATE INDEX IF NOT EXISTS idx_rides_status_depart ON rides(status, depart_at);
 CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_ride_alerts_to ON ride_alerts(depart_to);
+CREATE INDEX IF NOT EXISTS idx_commutes_status ON commutes(status);
+CREATE INDEX IF NOT EXISTS idx_commute_members_user ON commute_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_commute_messages ON commute_messages(commute_id, id);
 `;
 
 // 이전 버전 DB 파일에 새 컬럼을 추가한다 (ALTER TABLE ADD COLUMN 은 NOT NULL 이면 기본값 필요)

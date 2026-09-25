@@ -1,5 +1,6 @@
 import { api, canUseRides, refreshMe, setSession, state } from '../core.js';
 import { startIdentityVerification } from '../identity.js';
+import { takeAfterLogin } from './commutes.js';
 import { h, toast } from '../ui.js';
 
 const MIN_AGE = 19;
@@ -109,7 +110,9 @@ export function authScreen() {
         const { token, user, devCode } = await api('POST', `/auth/${mode}`, data);
         setSession(token, user);
         if (devCode) sessionStorage.setItem('meet.devCode', devCode);
-        location.hash = canUseRides() ? '#/' : '#/verify';
+        // 노선 화면에서 로그인하러 왔으면 그 화면으로 돌아간다
+        const back = takeAfterLogin();
+        location.hash = canUseRides() ? (back && back !== '#/login' ? back : '#/') : '#/verify';
       } catch (err) {
         toast(err.message);
       }
@@ -209,7 +212,7 @@ export function verifyScreen() {
         sessionStorage.removeItem('meet.devCode');
         await refreshMe();
         toast('본인 확인이 완료되었어요!');
-        location.hash = '#/';
+        location.hash = takeAfterLogin() ?? '#/';
       } catch (err) {
         toast(err.message);
       }

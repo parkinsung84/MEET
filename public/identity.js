@@ -1,4 +1,5 @@
 import { api, refreshMe, state } from './core.js';
+import { takeAfterLogin } from './screens/commutes.js';
 import { toast } from './ui.js';
 
 // 휴대폰 본인확인(PASS 등) — 포트원 V2 브라우저 SDK. 결과는 서버가 포트원에 직접 확인한다.
@@ -24,7 +25,7 @@ async function complete(identityVerificationId) {
   await api('POST', '/auth/identity/complete', { identityVerificationId });
   await refreshMe();
   toast('✅ 본인 확인이 완료되었어요!');
-  location.hash = '#/';
+  location.hash = takeAfterLogin() ?? '#/';
 }
 
 /** 본인확인 창 열기. PC는 팝업으로 결과를 바로 받고, 모바일은 인증 후 앱 주소로 돌아온다 (handleIdentityReturn) */

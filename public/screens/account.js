@@ -2,9 +2,18 @@ import { rideCard, trustChips } from '../components.js';
 import { api, formatTime, listen, logout, refreshMe, setSession, state } from '../core.js';
 import { disablePush, enablePush, pushStatus } from '../push.js';
 import { ask, h, sheet, toast } from '../ui.js';
+import { commuteCard } from './commutes.js';
 
 export function myRidesScreen() {
-  const root = h('div', {}, h('h1', {}, '내 합승'));
+  const root = h('div', {}, h('h1', {}, '내 출퇴근 노선'));
+  const commuteBox = h('div', {}, h('div', { class: 'empty' }, '불러오는 중…'));
+  root.append(commuteBox, h('h1', {}, '내 합승'));
+  api('GET', '/commutes/mine')
+    .then(({ commutes }) => commuteBox.replaceChildren(...(commutes.length
+      ? commutes.map(commuteCard)
+      : [h('div', { class: 'empty stack' }, h('div', {}, '참여 중인 노선이 없어요.'),
+        h('a', { class: 'btn', href: '#/' }, '노선 찾아보기'))])))
+    .catch((err) => toast(err.message));
   api('GET', '/rides/mine')
     .then(({ rides }) => {
       const active = rides.filter((r) => r.status === 'open' || r.status === 'departed');
@@ -127,6 +136,7 @@ function orgCard(user) {
 const LOCATION_ACTIONS = {
   reverse_geocode: '📍 현재 위치 → 주소 변환',
   place_search: '🔎 장소 검색 (현재 위치 근처 먼저)',
+  commute_create: '🔁 정기 노선 등록',
   search: '🔍 주변 합승 검색',
   ride_create: '🚕 합승방 생성',
   dropoff: '🛑 하차 지점 설정',

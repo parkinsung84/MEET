@@ -52,6 +52,14 @@ export function createAuth(db, secret) {
       bump.run(userId);
     },
 
+    /** 로그인했으면 req.userId 를 채우고, 안 했어도 통과 (공개 화면용) */
+    optional(req, res, next) {
+      const header = req.get('authorization') ?? '';
+      const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+      req.userId = (token && auth.verify(token)) || null;
+      next();
+    },
+
     required(req, res, next) {
       const header = req.get('authorization') ?? '';
       const token = header.startsWith('Bearer ') ? header.slice(7) : null;

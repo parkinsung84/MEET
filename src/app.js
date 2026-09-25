@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server } from 'socket.io';
@@ -23,6 +25,8 @@ import { placesRouter } from './routes/places.js';
 import { ridesRouter } from './routes/rides.js';
 import { alertsRouter, notificationsRouter, usersRouter } from './routes/users.js';
 import { createUserService } from './users.js';
+import { createCommuteService } from './commutes.js';
+import { commutesRouter } from './routes/commutes.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public', import.meta.url));
 const TICK_MS = 60 * 1000;
@@ -52,6 +56,13 @@ export function createApp({
   const auth = createAuth(db, secret);
   const pusher = push === undefined ? createWebPush(db) : push;
   const notifier = createNotifier(db, { push: pusher });
+  // 네이버 길찾기가 설정돼 있으면 실제 도로 경로/택시요금을 사용하고, 실패하면 추정치로 대체
+  const routeFinder = naver.directionsEnabled
+    ? (origin, destination) => naver.route(origin, destination).catch((err) => {
+        console.error('[naver] route:', err.message);
+        return null;
+      })
+    : null;
   const users = createUserService(db, { secret, mailer, sms, identity, exposeDevCode, verificationRequired });
   const locationLog = createLocationLog(db);
   const rides = createRideService(db, {
@@ -59,15 +70,11 @@ export function createApp({
     notifier,
     locationLog,
     // 네이버 길찾기가 설정돼 있으면 실제 도로 경로/택시요금을 사용하고, 실패하면 추정치로 대체
-    findRoute: naver.directionsEnabled
-      ? (origin, destination) => naver.route(origin, destination).catch((err) => {
-          console.error('[naver] route:', err.message);
-          return null;
-        })
-      : null,
+    findRoute: routeFinder,
   });
   const alerts = createAlertService(db, { rides, notifier, locationLog });
   const inquiries = createInquiryService(db, { rides, users, notifier });
+  const commutes = createCommuteService(db, { rides, users, notifier, locationLog, findRoute: routeFinder });
 
   const app = express();
   const server = createServer(app);
@@ -95,11 +102,29 @@ export function createApp({
     next();
   });
   const calls = createCallService(io, { rides, users, notifier, ringTimeoutMs: callRingTimeoutMs });
-  const realtime = attachRealtime(io, rides, auth, { calls });
+  const realtime = attachRealtime(io, rides, auth, { calls, commutes });
   const rideChanged = (rideId) => realtime.rideChanged(rideId).catch((err) => console.error('[realtime]', err));
   const matcher = createMatcher(db, { rides, users, notifier, onChange: rideChanged });
 
   app.use(express.json({ limit: '32kb' }));
+  // 노선 공유 링크: 카톡 등에서 미리보기(제목·설명)가 보이도록 노선 정보를 넣은 첫 화면을 준다
+  const indexHtml = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8');
+  const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+  app.get('/c/:id', (req, res) => {
+    let meta = '';
+    try {
+      const c = commutes.get(req.params.id);
+      const title = `${c.origin.area} → ${c.destination.area} ${c.daysLabel} ${c.departTime} 택시 같이 타요`;
+      const desc = `${c.seatsLeft ? `${c.seatsLeft}자리 남음` : '마감'} · 1인 약 ${c.fare.perPerson.toLocaleString('ko-KR')}원 · MEET 출퇴근 택시`;
+      meta = [
+        `<meta property="og:title" content="${escapeHtml(title)}">`,
+        `<meta property="og:description" content="${escapeHtml(desc)}">`,
+        '<meta property="og:type" content="website">',
+        `<meta name="description" content="${escapeHtml(desc)}">`,
+      ].join('\n  ');
+    } catch { /* 없는 노선이면 기본 화면 */ }
+    res.type('html').send(indexHtml.replace('</head>', `  ${meta}\n</head>`));
+  });
   app.use(express.static(PUBLIC_DIR));
   app.get('/api/health', (req, res) => {
     db.prepare('SELECT 1').get(); // DB 응답 확인
@@ -135,6 +160,11 @@ export function createApp({
     changed: realtime.rideChanged,
     inquiryPosted: realtime.inquiryPosted,
   }));
+  app.use('/api/commutes', commutesRouter({
+    commutes, auth,
+    changed: (id) => realtime.commuteChanged(id).catch((err) => console.error('[realtime]', err)),
+    messagePosted: realtime.commuteMessage,
+  }));
   app.use('/api', (req, res) => res.status(404).json({ error: '존재하지 않는 API입니다.' }));
 
   // Express 5 forwards thrown errors (sync and async) here.
@@ -151,12 +181,15 @@ export function createApp({
     alerts.purgeExpired(now);
     account.purgeExpired(now);
     locationLog.purgeExpired(now);
-    // 자동 매칭: 만료 처리와 대기 요청 재시도 (비동기 — 테스트에서는 await 가능)
-    return matcher.tick(now).catch((err) => console.error('[matcher]', err));
+    // 자동 매칭 재시도와 정기 노선 오늘 합승방 열기 (비동기 — 테스트에서는 await 가능)
+    return Promise.all([
+      matcher.tick(now).catch((err) => console.error('[matcher]', err)),
+      commutes.tick(now).then((ids) => ids.forEach(rideChanged)).catch((err) => console.error('[commute]', err)),
+    ]);
   }
 
   return {
-    app, server, db, io, tick, calls, matcher,
+    app, server, db, io, tick, calls, matcher, commutes,
     startScheduler() {
       const timer = setInterval(() => {
         try { tick(); } catch (err) { console.error('[scheduler]', err); }

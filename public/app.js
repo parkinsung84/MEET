@@ -5,6 +5,7 @@ import { loadNaverMaps } from './maps.js';
 import { registerServiceWorker, syncPush } from './push.js';
 import { myRidesScreen, notificationsScreen, profileScreen } from './screens/account.js';
 import { authScreen, consentScreen, forgotScreen, verifyScreen } from './screens/auth.js';
+import { commuteHomeScreen, commuteScreen, newCommuteScreen } from './screens/commutes.js';
 import { homeScreen } from './screens/home.js';
 import { newRideScreen } from './screens/new-ride.js';
 import { rideScreen } from './screens/ride.js';
@@ -16,11 +17,11 @@ function renderNav() {
   const nav = document.getElementById('nav');
   nav.replaceChildren(...(state.user
     ? [
-      h('a', { href: '#/mine' }, '내 합승'),
+      h('a', { href: '#/mine' }, '내 노선'),
       h('a', { href: '#/notifications', class: 'bell', 'aria-label': `알림 ${unread}개` }, '🔔', unread > 0 && h('span', { class: 'badge' }, unread > 99 ? '99+' : unread)),
       h('a', { href: '#/me', 'aria-label': '내 정보' }, '👤'),
     ]
-    : []));
+    : [h('a', { href: '#/login' }, '로그인')]));
 }
 
 async function refreshUnread() {
@@ -30,10 +31,15 @@ async function refreshUnread() {
   renderNav();
 }
 
-// 인증이 필요 없는 화면
-const PUBLIC = new Set(['/login', '/forgot']);
-// 이메일 인증 전에도 볼 수 있는 화면 (둘러보기는 가능, 만들기/참여는 서버에서 막음)
+// 로그인 없이 볼 수 있는 화면 (노선 목록·상세는 링크로 퍼뜨리기 위해 공개)
+const PUBLIC = [/^\/$/, /^\/c\/\d+$/, /^\/login$/, /^\/forgot$/];
+// 로그인한 사람은 볼 필요 없는 화면
+const GUEST_ONLY = new Set(['/login', '/forgot']);
 const SCREENS = [
+  [/^\/$/, commuteHomeScreen],
+  [/^\/c\/(\d+)$/, (id) => commuteScreen(Number(id))],
+  [/^\/commutes\/new$/, newCommuteScreen],
+  [/^\/rides$/, homeScreen],
   [/^\/login$/, authScreen],
   [/^\/forgot$/, forgotScreen],
   [/^\/consent$/, consentScreen],
@@ -51,11 +57,12 @@ function route() {
   // 열려 있던 시트(모달)는 화면을 옮기면 닫는다 (통화 화면은 유지)
   document.querySelectorAll('.sheet-backdrop').forEach((el) => el.remove());
   const path = location.hash.slice(1) || '/';
-  if (!state.user && !PUBLIC.has(path)) {
+  if (!state.user && !PUBLIC.some((re) => re.test(path))) {
+    sessionStorage.setItem('meet.afterLogin', location.hash);
     location.hash = '#/login';
     return;
   }
-  if (state.user && PUBLIC.has(path)) {
+  if (state.user && GUEST_ONLY.has(path)) {
     location.hash = '#/';
     return;
   }
@@ -73,7 +80,7 @@ function route() {
     }
   }
   renderNav();
-  document.getElementById('app').replaceChildren(screen ?? homeScreen());
+  document.getElementById('app').replaceChildren(screen ?? commuteHomeScreen());
   window.scrollTo(0, 0);
 }
 
@@ -96,6 +103,9 @@ window.addEventListener('session:ended', () => {
 });
 
 async function boot() {
+  // 공유 링크(/c/12)로 들어오면 앱 주소(#/c/12)로 바꾼다
+  const shared = location.pathname.match(/^\/c\/(\d+)$/);
+  if (shared) history.replaceState(null, '', `/#/c/${shared[1]}`);
   registerServiceWorker();
   const config = await api('GET', '/config').catch(() => ({}));
   state.config = { ...state.config, ...config };
