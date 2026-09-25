@@ -2,13 +2,15 @@
  * 네이버 지도/검색 API 클라이언트 (서버 전용 — 비밀키가 브라우저로 나가지 않도록 여기서만 호출한다).
  *
  *  - NAVER Cloud Platform Maps (ncpKeyId / ncpKey): Geocoding, Reverse Geocoding, Directions 5
- *  - NAVER Developers 검색 API (searchClientId / searchClientSecret): 지역(장소명) 검색
+ *  - NAVER API HUB 검색 (apiHubKeyId / apiHubKey): 지역(장소명) 검색 — 2026년부터 발급되는 방식
+ *  - (예전) NAVER Developers 검색 API (searchClientId / searchClientSecret): 2027-06-30까지 동작, HUB 실패 시 대체
  *
  * 키가 없는 기능은 비활성화되며, 호출하는 쪽에서 대체 동작을 한다.
  */
 
 const DEFAULT_MAPS_BASE_URL = 'https://maps.apigw.ntruss.com';
 const DEFAULT_OPENAPI_BASE_URL = 'https://openapi.naver.com';
+const DEFAULT_APIHUB_BASE_URL = 'https://naverapihub.apigw.ntruss.com';
 const TIMEOUT_MS = 5000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX = 500;
@@ -45,13 +47,18 @@ export function createNaverClient({
   ncpKey,
   searchClientId,
   searchClientSecret,
+  apiHubKeyId,
+  apiHubKey,
+  apiHubBaseUrl = DEFAULT_APIHUB_BASE_URL,
   mapsBaseUrl = DEFAULT_MAPS_BASE_URL,
   openApiBaseUrl = DEFAULT_OPENAPI_BASE_URL,
   fetch = globalThis.fetch,
   directionsEnabled = true,
 } = {}) {
   const mapsEnabled = Boolean(ncpKeyId && ncpKey);
-  const searchEnabled = Boolean(searchClientId && searchClientSecret);
+  const hubEnabled = Boolean(apiHubKeyId && apiHubKey);
+  const legacySearchEnabled = Boolean(searchClientId && searchClientSecret);
+  const searchEnabled = hubEnabled || legacySearchEnabled;
   const cache = createCache();
 
   async function getJson(url, headers) {
@@ -76,20 +83,32 @@ export function createNaverClient({
     return value;
   }
 
-  /** 장소명(POI) 검색: "스타벅스 강남역점", "서울대학교" 등 */
-  async function localSearch(query) {
-    const url = `${openApiBaseUrl}/v1/search/local.json?${new URLSearchParams({ query, display: '5' })}`;
-    const body = await getJson(url, {
-      'X-Naver-Client-Id': searchClientId,
-      'X-Naver-Client-Secret': searchClientSecret,
-    });
-    // mapx/mapy: WGS84 경위도 × 10^7 정수 문자열
-    return (body.items ?? []).map((item) => ({
+  // mapx/mapy: WGS84 경위도 × 10^7 정수 문자열 (API HUB와 예전 API 응답 형식이 같다)
+  const toPlaces = (body) =>
+    (body.items ?? []).map((item) => ({
       name: stripTags(item.title),
       address: item.roadAddress || item.address || '',
       category: item.category || '',
       lat: Number(item.mapy) / 1e7,
       lng: Number(item.mapx) / 1e7,
+    }));
+
+  /** 장소명(POI) 검색: "스타벅스 강남역점", "서울대학교" 등. API HUB 우선, 실패하면 예전 키로. */
+  async function localSearch(query) {
+    const params = new URLSearchParams({ query, display: '5' });
+    if (hubEnabled) {
+      try {
+        return toPlaces(await getJson(`${apiHubBaseUrl}/search/v1/local?${params}`, {
+          'X-NCP-APIGW-API-KEY-ID': apiHubKeyId,
+          'X-NCP-APIGW-API-KEY': apiHubKey,
+        }));
+      } catch (err) {
+        if (!legacySearchEnabled) throw err;
+      }
+    }
+    return toPlaces(await getJson(`${openApiBaseUrl}/v1/search/local.json?${params}`, {
+      'X-Naver-Client-Id': searchClientId,
+      'X-Naver-Client-Secret': searchClientSecret,
     }));
   }
 
@@ -192,6 +211,10 @@ export function naverClientFromEnv(env = process.env) {
     ncpKey: env.NAVER_MAP_KEY,
     searchClientId: env.NAVER_SEARCH_CLIENT_ID,
     searchClientSecret: env.NAVER_SEARCH_CLIENT_SECRET,
+    // NAVER API HUB (NCP 콘솔 → NAVER API HUB → Application → 인증 정보의 Client ID / Client Secret)
+    apiHubKeyId: env.NAVER_APIHUB_KEY_ID,
+    apiHubKey: env.NAVER_APIHUB_KEY,
+    apiHubBaseUrl: env.NAVER_APIHUB_BASE_URL || undefined,
     mapsBaseUrl: env.NAVER_MAPS_BASE_URL || undefined,
     openApiBaseUrl: env.NAVER_OPENAPI_BASE_URL || undefined,
   });

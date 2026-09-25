@@ -55,10 +55,15 @@
 
 - **업데이트**: 제가 GitHub 에 올리면 자동으로 다시 배포돼요 (배포 중 수십 초 정도 접속이 끊길 수 있어요 — 디스크를 쓰는 서비스는 서버 1대로 운영되기 때문)
 - **모든 주소·장소 검색 켜기 (중요)**: 키가 없으면 주요 장소 18곳만 검색돼요.
-  1. https://developers.naver.com/apps → **애플리케이션 등록** → 사용 API **검색** → 비로그인 오픈 API 환경 **WEB** 에 Render 주소 입력 → 등록
-  2. 발급된 **Client ID / Client Secret** 을 Environment 의 `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` 에 저장 (무료, 장소명 검색)
+  1. https://console.ncloud.com 로그인 → **Services → Application Services → NAVER API HUB**
+     (네이버 검색 API는 개발자센터에서 NAVER API HUB 로 옮겨졌어요. 개발자센터 키는 HUB 에서 안 돼요)
+  2. **Application 등록** → 사용할 API 에서 **검색 > 지역(local)** 선택 → 등록
+  3. 만든 Application 의 **인증 정보** 에서 **Client ID / Client Secret** 확인
+  4. Render → Environment 에 `NAVER_APIHUB_KEY_ID` = Client ID, `NAVER_APIHUB_KEY` = Client Secret 저장 → 자동 재배포
+     (키는 Render 에만 넣고 채팅·메신저에 붙여넣지 마세요)
+  - 예전에 개발자센터에서 받은 키가 있다면 `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` 도 계속 돼요 (2027-06-30까지, HUB 실패 시 대체용)
   3. (선택) 번지·도로명 주소 검색까지: NCP 콘솔 → Maps → Application 등록(Geocoding, Reverse Geocoding 선택) → `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` 에 저장하고, 유료 길찾기를 쓰지 않으려면 `NAVER_DIRECTIONS` = `0`
-- **선택 기능 켜기**: Environment 에 추가 — 네이버 지도(`NAVER_MAP_KEY_ID`, `NAVER_MAP_KEY`), 장소 검색(`NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET`), 소속 인증 메일(`SMTP_URL`), 음성 통화 중계(`TURN_URLS`, `TURN_SECRET`) — 설명은 `.env.example`
+- **선택 기능 켜기**: Environment 에 추가 — 네이버 지도(`NAVER_MAP_KEY_ID`, `NAVER_MAP_KEY`), 장소 검색(`NAVER_APIHUB_KEY_ID`, `NAVER_APIHUB_KEY`), 소속 인증 메일(`SMTP_URL`), 음성 통화 중계(`TURN_URLS`, `TURN_SECRET`) — 설명은 `.env.example`
 - 네이버 지도를 켜면 NCP 콘솔 Maps 앱의 **Web 서비스 URL** 에 `https://meet-xxxx.onrender.com` 등록
 - **내 도메인 연결(선택)**: 서비스 → Settings → Custom Domains
 - **백업**: 데이터는 `/data` 디스크에 있어요. Render 대시보드의 디스크 스냅샷(자동 백업) 기능을 확인해 두시고, 필요하면 서비스 → Shell 에서 `node scripts/backup.js` 로 수동 백업할 수 있어요 (`BACKUP_DIR=/data/backups`)

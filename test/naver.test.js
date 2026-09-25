@@ -82,6 +82,29 @@ test('searchPlaces: 모두 실패하면 에러', async () => {
   await assert.rejects(createNaverClient({ ...KEYS, fetch }).searchPlaces('x'));
 });
 
+test('API HUB 키가 있으면 새 주소·헤더로 장소 검색', async () => {
+  const item = { title: '<b>서울대</b>학교', category: '대학교', roadAddress: '서울 관악구 관악로 1', mapx: '1269520000', mapy: '374600000' };
+  const { fetch, calls } = fakeFetch({ '/search/v1/local': () => [200, { items: [item] }] });
+  const naver = naverClientFromEnv({ NAVER_APIHUB_KEY_ID: 'hid', NAVER_APIHUB_KEY: 'hsecret' });
+  assert.equal(naver.searchEnabled, true);
+  const places = await createNaverClient({ apiHubKeyId: 'hid', apiHubKey: 'hsecret', fetch }).searchPlaces('서울대');
+  assert.deepEqual(places, [{ name: '서울대학교', address: '서울 관악구 관악로 1', category: '대학교', lat: 37.46, lng: 126.952 }]);
+  assert.equal(calls[0].path, '/search/v1/local');
+  assert.equal(calls[0].params.query, '서울대');
+  assert.equal(calls[0].headers['X-NCP-APIGW-API-KEY-ID'], 'hid');
+  assert.equal(calls[0].headers['X-NCP-APIGW-API-KEY'], 'hsecret');
+});
+
+test('API HUB가 실패하면 예전 검색 키로 대체', async () => {
+  const { fetch, calls } = fakeFetch({
+    '/search/v1/local': () => [401, { error: 'unauthorized' }],
+    '/v1/search/local.json': () => [200, { items: [{ title: '강남역', address: '서울', mapx: '1270276000', mapy: '374979000' }] }],
+  });
+  const places = await createNaverClient({ apiHubKeyId: 'h', apiHubKey: 'x', searchClientId: 'sid', searchClientSecret: 's', fetch }).searchPlaces('강남역');
+  assert.equal(places[0].name, '강남역');
+  assert.deepEqual(calls.map((c) => c.path), ['/search/v1/local', '/v1/search/local.json']);
+});
+
 test('reverseGeocode: 도로명 주소와 건물명을 돌려준다', async () => {
   const { fetch, calls } = fakeFetch({
     '/map-reversegeocode/v2/gc': () => [200, {

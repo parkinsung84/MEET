@@ -94,7 +94,8 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 | `STUN_URLS` | STUN 서버 (기본 `stun:stun.l.google.com:19302`) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | 웹 푸시 키. 비우면 최초 실행 시 자동 생성해 DB에 저장 |
 | `NAVER_MAP_KEY_ID` / `NAVER_MAP_KEY` | 네이버 클라우드 Maps Client ID / Client Secret (선택) |
-| `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | 네이버 개발자센터 검색 API Client ID / Secret (선택) |
+| `NAVER_APIHUB_KEY_ID` / `NAVER_APIHUB_KEY` | NAVER API HUB 검색(지역) Client ID / Secret (선택, 장소명 검색) |
+| `NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET` | (예전) 네이버 개발자센터 검색 키 — 2027-06-30까지 동작, HUB 실패 시 대체 |
 | `NAVER_DIRECTIONS` | `0` 이면 유료 길찾기(Directions 5)를 쓰지 않고 직선거리로 요금 추정 (지도·주소 검색은 그대로) |
 
 > 🚀 **가장 쉬운 배포: [RENDER.md](RENDER.md)** (저장소 연결 → 자동 배포·HTTPS·디스크). 서버를 직접 운영하려면 [DEPLOY.md](DEPLOY.md) — Docker + Caddy(자동 HTTPS) + 매일 백업 + (선택) coturn, 공개 전 실제 기기 확인 체크리스트 포함
@@ -111,9 +112,11 @@ npm test                  # API·네이버 연동·실시간 채팅 테스트
 3. **Web 서비스 URL** 에 앱 주소 등록 (예: `http://localhost:3000`, 운영 도메인) — 등록되지 않은 주소에서는 지도 인증이 실패합니다
 4. 발급된 `Client ID` → `NAVER_MAP_KEY_ID`, `Client Secret` → `NAVER_MAP_KEY`
 
-**2. 네이버 개발자센터 검색 API** (장소명 검색) — https://developers.naver.com/apps
-1. **애플리케이션 등록** → 사용 API: **검색**
-2. `Client ID` → `NAVER_SEARCH_CLIENT_ID`, `Client Secret` → `NAVER_SEARCH_CLIENT_SECRET`
+**2. NAVER API HUB 검색** (장소명 검색) — https://console.ncloud.com
+네이버 검색 API는 개발자센터에서 NCP 의 NAVER API HUB 로 이전됐습니다 (개발자센터 키는 HUB 에서 동작하지 않음).
+1. `Services > Application Services > NAVER API HUB` 에서 **Application 등록** → API: **검색 > 지역**
+2. Application **인증 정보** 의 `Client ID` → `NAVER_APIHUB_KEY_ID`, `Client Secret` → `NAVER_APIHUB_KEY`
+3. 예전 개발자센터 키(`NAVER_SEARCH_CLIENT_ID` / `NAVER_SEARCH_CLIENT_SECRET`)가 있으면 HUB 실패 시 대체로 사용
 
 > 주소 검색(Geocoding)은 "테헤란로 152" 같은 **주소**만 찾고, "스타벅스 강남역점" 같은 **장소명**은 검색 API가 찾습니다.
 > 둘 다 설정하면 결과를 합쳐서 보여줍니다.
