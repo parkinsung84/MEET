@@ -353,3 +353,18 @@ p.small { font-size: .72rem; }
 .gmsg .who { font-weight: 700; }
 .gchat-route label { flex: 1; min-width: 0; font-size: 0; }
 .gchat-route select { width: 100%; font-size: .9rem; }
+
+/* 노선 → 시간대 → 크루 참여 */
+.commute-hero { padding: 16px 0 4px; }
+.commute-hero .eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .03em; }
+.commute-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0; margin: 8px 0 20px; list-style: none; }
+.commute-steps li { text-align: center; font-size: .8rem; padding: 10px 3px; color: var(--muted); border-bottom: 3px solid var(--line); }
+.commute-steps .current { color: var(--ink); font-weight: 800; border-color: var(--brand); }
+.route-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.route-selects select { min-width: 0; }
+.hub-chooser p { margin: 0; }
+.commute-extra summary { cursor: pointer; font-weight: 700; padding: 4px 0; }
+.commute-extra[open] > summary { margin-bottom: 16px; }
+.crew-card-action { justify-self: end; font-size: .8rem; font-weight: 700; margin-top: 8px; }
+.time-filter { margin-bottom: 14px; }
+@media (max-width: 360px) { .route-selects, .featured { grid-template-columns: 1fr; } }

@@ -1,5 +1,6 @@
 import { formatKm, trustChips } from '../components.js';
 import { api, canUseRides, emit, listen, onLeave, relativeTime, state, won } from '../core.js';
+import { selectCrews } from '../commute-filters.js';
 import { locate } from '../here.js';
 import { h, sheet, toast } from '../ui.js';
 
@@ -31,10 +32,11 @@ export function commuteCard(c) {
     h('div', { class: 'chips' },
       h('span', { class: `chip${c.seatsLeft ? ' hl' : ''}` }, c.seatsLeft ? `${c.seatsLeft}자리 남음` : '마감'),
       h('span', { class: 'chip' }, `${c.memberCount}/${c.maxSeats}명`),
-      h('span', { class: 'chip' }, `1인 약 ${won(c.fare.perPerson)}`),
+      h('span', { class: 'chip' }, `${c.maxSeats}명 탑승 시 1인 약 ${won(c.fare.perPerson)}`),
       c.genderPref !== 'any' && h('span', { class: 'chip' }, GENDER_ONLY[c.genderPref]),
       c.joined && h('span', { class: 'chip ok' }, c.isOwner ? '내 노선' : '참여 중')),
-    c.memo && h('p', { class: 'muted memo-line' }, c.memo));
+    c.memo && h('p', { class: 'muted memo-line' }, c.memo),
+    h('span', { class: 'crew-card-action' }, c.joined ? '내 크루 보기 →' : c.seatsLeft ? '일정 확인하고 참여하기 →' : '크루 정보 보기 →'));
 }
 
 // ---------------------------------------------------------------- 거점
@@ -140,43 +142,78 @@ function featuredCard(r) {
  * 노선 직접 고르기: ① 출발 거점 → ② 도착 거점 (지역별 칩). 고르면 바로 노선 화면으로.
  */
 function hubChooser() {
-  let from = null;
-  const box = h('div', { class: 'card stack hub-chooser' });
-  const locateBtn = h('button', {
-    type: 'button', class: 'secondary small',
+  const box = h('form', { class: 'card stack hub-chooser' });
+  const from = h('select', { required: true, 'aria-label': '출발 거점', disabled: true });
+  const to = h('select', { required: true, 'aria-label': '도착 거점', disabled: true });
+  const submit = h('button', { type: 'submit', disabled: true }, '이 노선의 시간대 보기 →');
+  const status = h('p', { class: 'muted', role: 'status' }, '거점을 불러오는 중…');
+  let hubs = [];
+  const sync = () => {
+    for (const option of to.options) option.disabled = Boolean(from.value) && option.value === from.value;
+    if (to.value === from.value) to.value = '';
+    submit.disabled = !from.value || !to.value;
+  };
+  from.addEventListener('change', sync);
+  to.addEventListener('change', sync);
+  const nearby = h('button', { type: 'button', class: 'secondary small', disabled: true,
     onclick: async () => {
-      const here = await locate({ accurate: true });
-      if (!here) return toast('위치를 가져올 수 없어요. 브라우저의 위치 권한을 확인해 주세요.');
-      const { hubs } = await loadHubs();
-      const nearest = hubs.reduce((best, x) => (!best || km(here, x) < km(here, best) ? x : best), null);
-      if (km(here, nearest) > 5) return toast('가까운 거점이 없어요. 목록에서 골라 주세요.');
-      from = nearest;
-      render();
+      nearby.disabled = true;
+      try {
+        const here = await locate({ accurate: true });
+        if (!here) return toast('위치를 가져올 수 없어요. 목록에서 출발 거점을 골라 주세요.');
+        const nearest = hubs.reduce((best, x) => !best || km(here, x) < km(here, best) ? x : best, null);
+        if (!nearest || km(here, nearest) > 5) return toast('5km 안에 거점이 없어요. 목록에서 골라 주세요.');
+        from.value = nearest.code;
+        sync();
+      } catch { toast('위치를 가져오지 못했어요. 목록에서 골라 주세요.'); }
+      finally { nearby.disabled = false; }
     },
-  }, '📍 내 위치에서 가까운 거점');
-
-  async function render() {
-    const { groups, hubs } = await loadHubs();
-    const chip = (x, onPick, disabled = false) => h('button', {
-      type: 'button', class: `hub-chip${from?.code === x.code ? ' on' : ''}`, disabled, onclick: () => onPick(x),
-    }, x.name);
-    const grid = (onPick) => groups.map((g) => h('div', { class: 'hub-group' },
-      h('div', { class: 'hub-group-name' }, g),
-      h('div', { class: 'hub-chips' }, hubs.filter((x) => x.group === g).map((x) => chip(x, onPick, from && x.code === from.code)))));
-    if (!from) {
-      box.replaceChildren(
-        h('div', { class: 'row step-head' }, h('strong', {}, '① 어디서 출발하세요?'), locateBtn),
-        ...grid((x) => { from = x; render(); window.scrollTo({ top: box.offsetTop - 60, behavior: 'smooth' }); }));
-    } else {
-      box.replaceChildren(
-        h('div', { class: 'row step-head' },
-          h('strong', {}, `② ${from.name}에서 어디로 가세요?`),
-          h('button', { type: 'button', class: 'secondary small', onclick: () => { from = null; render(); } }, '출발 다시 고르기')),
-        ...grid((x) => { location.hash = `#/r/${from.code}/${x.code}`; }));
+  }, '📍 가까운 출발 거점');
+  async function load() {
+    status.textContent = '거점을 불러오는 중…';
+    try {
+      const data = await loadHubs();
+      hubs = data.hubs;
+      for (const [select, label] of [[from, '출발 거점 선택'], [to, '도착 거점 선택']]) {
+        select.replaceChildren(h('option', { value: '' }, label),
+          ...data.groups.map((g) => h('optgroup', { label: g },
+            hubs.filter((x) => x.group === g).map((x) => h('option', { value: x.code }, x.name)))));
+        select.disabled = false;
+      }
+      nearby.disabled = false;
+      status.textContent = '로그인 없이 시간대와 크루를 먼저 볼 수 있어요.';
+    } catch {
+      status.replaceChildren('거점을 불러오지 못했어요. ', h('button', {
+        type: 'button', class: 'secondary small', onclick: load,
+      }, '다시 시도'));
     }
   }
-  render().catch(() => box.replaceChildren(h('div', { class: 'empty' }, '거점 목록을 불러오지 못했어요.')));
+  box.append(h('h2', {}, '내 출퇴근 노선 찾기'),
+    h('div', { class: 'route-selects' }, h('label', {}, '출발', from), h('label', {}, '도착', to)),
+    nearby, submit, status);
+  box.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (from.value && to.value && from.value !== to.value) location.hash = `#/r/${from.value}/${to.value}`;
+  });
+  load();
   return box;
+}
+
+/** 보조 기능은 필요할 때 펼쳐서 사용한다. */
+function disclosure(title, build) {
+  const details = h('details', { class: 'card commute-extra' }, h('summary', {}, title));
+  let loaded = false;
+  details.addEventListener('toggle', () => {
+    if (details.open && !loaded) { loaded = true; details.append(build()); }
+  });
+  return details;
+}
+
+function commuteSteps(active) {
+  return h('ol', { class: 'commute-steps', 'aria-label': '정기 합승 참여 순서' },
+    ...['노선 선택', '시간대 선택', '크루 참여'].map((label, index) => h('li', {
+      class: index === active ? 'current' : '', 'aria-current': index === active ? 'step' : null,
+    }, `${index + 1}. ${label}`)));
 }
 
 /**
@@ -237,39 +274,29 @@ function globalChatCard() {
 
 export function commuteHomeScreen() {
   const featuredBox = h('div', { class: 'featured' }, h('div', { class: 'empty' }, '불러오는 중…'));
-  loadHubs({ fresh: true }).then(({ featured }) => {
-    // 크루가 있는 노선을 앞으로
-    const sorted = [...featured].sort((a, b) => b.riders - a.riders);
-    featuredBox.replaceChildren(...sorted.map(featuredCard));
-  }).catch((err) => featuredBox.replaceChildren(h('div', { class: 'empty' }, err.message)));
-
-  const list = h('div', {}, h('div', { class: 'empty' }, '불러오는 중…'));
-  async function load() {
+  async function loadFeatured() {
     try {
-      const { commutes } = await api('GET', '/commutes');
-      list.replaceChildren(...(commutes.length
-        ? [h('p', { class: 'muted list-count' }, `모집 중인 크루 전체 ${commutes.length}개`), ...commutes.map(commuteCard)]
-        : [h('div', { class: 'empty' }, '아직 모집 중인 크루가 없어요. 위에서 노선을 골라 첫 크루를 만들어 보세요!')]));
-    } catch (err) {
-      list.replaceChildren(h('div', { class: 'empty' }, err.message));
+      const { featured } = await loadHubs({ fresh: true });
+      const sorted = [...featured].sort((a, b) => b.riders - a.riders);
+      featuredBox.replaceChildren(...sorted.slice(0, 4).map(featuredCard));
+    } catch {
+      featuredBox.replaceChildren(h('button', { class: 'secondary', onclick: loadFeatured }, '추천 노선 다시 불러오기'));
     }
   }
-  listen(window, 'commutes:changed', () => load());
-  load();
-
+  loadFeatured();
+  listen(window, 'commutes:changed', loadFeatured);
   return h('div', {},
-    h('section', { class: 'hero' },
-      h('h1', {}, '출퇴근 택시, 같이 타면 ', h('span', { class: 'hl-text' }, '반값')),
-      h('p', {}, '강남·여의도·광화문·판교 등 주요 업무지구 노선이 모두 준비돼 있어요. 내 출퇴근 노선을 골라 같은 시간에 타는 사람들과 크루를 만드세요.')),
-    globalChatCard(),
-    h('h2', {}, '🔥 추천 출퇴근 노선'),
-    featuredBox,
-    h('h2', {}, '🧭 노선 직접 고르기'),
+    h('section', { class: 'hero commute-hero' },
+      h('p', { class: 'eyebrow' }, '매일 같은 길, 함께 타는 택시'),
+      h('h1', {}, '내 출퇴근길에 맞는', h('br'), h('span', { class: 'hl-text' }, '택시 크루를 찾아요')),
+      h('p', {}, '노선과 시간을 고르고, 같은 길을 가는 사람들과 택시비를 나눠요.')),
+    commuteSteps(0),
     hubChooser(),
-    h('h2', {}, '🚕 모집 중인 크루'),
-    list,
-    h('p', { class: 'muted center' },
-      '오늘 한 번만 같이 탈 사람을 찾나요? ', h('a', { href: '#/rides' }, '당일 합승 찾기 →')));
+    h('h2', {}, '추천 출퇴근 노선'),
+    h('p', { class: 'muted' }, '참여자가 있는 추천 노선부터 보여드려요. 요금은 4명 탑승 기준 예상액이에요.'),
+    featuredBox,
+    h('p', { class: 'muted center' }, '오늘 한 번만 타나요? ', h('a', { href: '#/rides' }, '당일 합승 찾기 →')),
+    disclosure('다른 노선 사람들과 이야기하기', globalChatCard));
 }
 
 // ---------------------------------------------------------------- 노선 화면 (출발 거점 → 도착 거점)
@@ -332,7 +359,6 @@ function routeChatCard(fromCode, toCode) {
 
 export function routeScreen(fromCode, toCode) {
   const root = h('div', {}, h('div', { class: 'empty' }, '불러오는 중…'));
-  const chat = routeChatCard(fromCode, toCode);
 
   async function share(r) {
     const url = `${location.origin}/r/${r.from.code}/${r.to.code}`;
@@ -347,7 +373,19 @@ export function routeScreen(fromCode, toCode) {
   }
 
   api('GET', `/commutes/routes/${fromCode}/${toCode}`).then(({ route: r }) => {
+    const crewList = h('div', { 'aria-live': 'polite' });
+    const timeFilter = h('select', { 'aria-label': '출발 시간대' },
+      ...[['all', '전체 시간'], ['morning', '오전 · 00:00–11:59'], ['afternoon', '오후 · 12:00–16:59'], ['evening', '저녁 · 17:00–23:59']]
+        .map(([value, label]) => h('option', { value }, label)));
+    const renderCrews = () => {
+      const crews = selectCrews(r.commutes, timeFilter.value);
+      crewList.replaceChildren(h('p', { class: 'muted' }, `${crews.length}개 크루 · 빈자리 우선, 출발 시각순`),
+        ...(crews.length ? crews.map(commuteCard) : [h('div', { class: 'empty' }, '이 시간대에는 아직 크루가 없어요. 다른 시간대를 보거나 아래에서 첫 크루를 만들어 보세요.')]));
+    };
+    timeFilter.addEventListener('change', renderCrews);
+    renderCrews();
     root.replaceChildren(h('div', {},
+      commuteSteps(1),
       h('div', { class: 'card route-head' },
         h('div', { class: 'muted' }, '출퇴근 노선'),
         h('div', { class: 'route big' },
@@ -360,18 +398,15 @@ export function routeScreen(fromCode, toCode) {
         h('div', { class: 'row' },
           h('a', { class: 'btn secondary small', href: `#/r/${r.to.code}/${r.from.code}` }, '↔ 반대 방향 (퇴근길)'),
           h('button', { class: 'secondary small', onclick: () => share(r) }, '🔗 노선 공유'))),
-      h('h2', {}, r.commutes.length ? `⏰ 모집 중인 크루 ${r.commutes.length}개` : '⏰ 아직 이 노선에 크루가 없어요'),
-      ...(r.commutes.length
-        ? r.commutes.map(commuteCard)
-        : [h('p', { class: 'muted' }, '첫 크루를 만들어 보세요. 노선 링크를 공유하면 같은 길을 가는 사람들이 들어와요.')]),
-      chat,
-      r.nearby.length > 0 && h('div', {},
-        h('h2', {}, '🧭 가까운 거점에서 출발·도착하는 크루'),
-        h('p', { class: 'muted' }, '양쪽 끝이 1.5km 안이라 같이 타기 괜찮아요.'),
-        ...r.nearby.map(commuteCard)),
-      h('div', { class: 'card stack' },
-        h('h2', {}, r.commutes.length ? '원하는 시간이 없나요?' : '＋ 첫 크루 만들기'),
+      h('h2', {}, '언제 출발하세요?'),
+      h('label', { class: 'time-filter' }, '출발 시간대', timeFilter),
+      crewList,
+      disclosure('원하는 시간이 없나요? 크루 만들기', () =>
         crewForm(() => ({ from: r.from.code, to: r.to.code }), { submitLabel: '이 시간으로 크루 만들기' })),
+      r.nearby.length > 0 && disclosure('가까운 거점의 크루도 보기', () => h('div', {},
+        h('p', { class: 'muted' }, '출발·도착 거점이 각각 1.5km 안에 있어요. 실제 만남 장소와 이동 거리를 확인해 주세요.'),
+        ...r.nearby.map(commuteCard))),
+      disclosure('이 노선에 대해 물어보기', () => routeChatCard(fromCode, toCode)),
       h('p', { class: 'center' }, h('a', { href: '#/' }, '← 다른 노선 고르기'))));
   }).catch((err) => root.replaceChildren(h('div', { class: 'empty' }, err.message)));
   return root;
@@ -463,8 +498,8 @@ export function commuteScreen(id) {
           if (!canUseRides()) { location.hash = '#/verify'; return; }
           act(() => api('POST', `/commutes/${c.id}/join`), '🎉 참여했어요! 크루 채팅으로 인사해 보세요.');
         },
-      }, state.user ? '🙋 이 노선 같이 타기' : '🙋 로그인하고 같이 타기'),
-      h('p', { class: 'muted' }, '참여하면 정확한 출발 위치·만남 장소와 크루 채팅이 열려요. 운행하는 날마다 출발 1시간 전에 합승방이 자동으로 열려요.'));
+      }, state.user ? '이 일정으로 크루 참여하기' : '로그인하고 크루 참여하기'),
+      h('p', { class: 'muted' }, '참여하면 매주 이 요일·시간에 함께하는 크루에 등록돼요. 만남 장소와 크루 채팅이 열리며, 택시는 멤버가 직접 호출해요. 운행하는 날마다 출발 1시간 전에 합승방이 자동으로 열려요.'));
   }
 
   function todayCard() {
@@ -541,6 +576,7 @@ export function commuteScreen(id) {
 
   function render() {
     root.replaceChildren(h('div', {},
+      commuteSteps(2),
       h('div', { class: 'card commute-head' },
         h('div', { class: 'commute-time big' }, h('strong', {}, c.departTime), h('span', {}, `${c.daysLabel} · 매주`)),
         h('div', { class: 'route' }, c.origin.area, h('span', { class: 'arrow' }, '→'), c.destination.area),
